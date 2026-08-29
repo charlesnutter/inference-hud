@@ -1,0 +1,51 @@
+{
+  "name": "inference-hud",
+  "displayName": "Inference HUD — local LLM tokens/sec",
+  "description": "Live tokens/sec, token counts, and time-to-first-token for local inference servers, in the status bar.",
+  "version": "0.0.1",
+  "publisher": "charlesnutter",
+  "license": "MIT",
+  "author": "Charles Nutter",
+  "repository": { "type": "git", "url": "https://github.com/charlesnutter/inference-hud.git" },
+  "bugs": { "url": "https://github.com/charlesnutter/inference-hud/issues" },
+  "homepage": "https://github.com/charlesnutter/inference-hud#readme",
+  "engines": { "vscode": "^1.134.0" },
+  "categories": ["Other", "Machine Learning"],
+  "keywords": [
+    "llm", "local", "tokens per second", "tok/s", "throughput", "inference",
+    "ollama", "llama.cpp", "mlx", "vllm", "lm studio", "mtplx", "status bar", "hud"
+  ],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "inferenceHud.showLog", "title": "Inference HUD: Show Log" },
+      { "command": "inferenceHud.reconnect", "title": "Inference HUD: Reconnect" }
+    ],
+    "configuration": {
+      "title": "Inference HUD",
+      "properties": {
+        "inferenceHud.serverUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8000",
+          "description": "Base URL of the local inference server to observe."
+        },
+        "inferenceHud.statusBarPriority": {
+          "type": "number",
+          "default": 100,
+          "description": "Status bar item priority (higher is further left)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -w -p .",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.134.0",
+    "typescript": "^5.6.0"
+  }
+}
