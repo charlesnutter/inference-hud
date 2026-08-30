@@ -4,6 +4,8 @@ const POLL_MS = 300;
 
 interface Slot {
 	is_processing: boolean;
+	/** Identifies the request occupying the slot; changes on every new one. */
+	id_task?: number;
 	n_prompt_tokens?: number;
 	n_prompt_tokens_processed?: number;
 	n_prompt_tokens_cache?: number;
@@ -66,12 +68,23 @@ export const llamaCppAdapter: TelemetryAdapter = {
 		let awaitingTotals = false;
 		let lastSlot: Slot | undefined;
 		let prevNpt: { tokens: number; at: number } | undefined;
+		// Slots are reused, and `is_processing` flips true a tick before the
+		// counters are reset — so a fresh task briefly reports the previous
+		// request's totals. Track the task id and distrust its first sample.
+		let taskId: number | undefined;
+		let samplesThisTask = 0;
 
 		while (!signal.aborted) {
 			const slots = (await getJson(`${base}/slots`, signal)) as Slot[] | null;
 			const active = Array.isArray(slots) ? slots.find(s => s.is_processing) : undefined;
 
 			if (active) {
+				if (active.id_task !== taskId) {
+					taskId = active.id_task;
+					samplesThisTask = 0;
+					prevNpt = undefined;
+				}
+				samplesThisTask++;
 				lastSlot = active;
 				const npt = active.n_prompt_tokens ?? 0;
 				// `n_prompt_tokens_processed` counts only what this request had
@@ -83,13 +96,15 @@ export const llamaCppAdapter: TelemetryAdapter = {
 				// beyond it in the slot's context is generated output.
 				const generated = npt - promptLen;
 
-				if (generated <= 0) {
+				if (generated <= 0 || samplesThisTask === 1) {
+					// The first sample of a task may still carry stale totals,
+					// so report it as prefill rather than trusting the count.
 					emit({ kind: 'prefill', done: promptLen, total: null });
-					prevNpt = undefined;
+					prevNpt = { tokens: npt, at: Date.now() };
 				} else {
 					const now = Date.now();
 					let rate: number | null = null;
-					if (prevNpt && now > prevNpt.at) {
+					if (prevNpt && now > prevNpt.at && npt >= prevNpt.tokens) {
 						rate = ((npt - prevNpt.tokens) * 1000) / (now - prevNpt.at);
 					}
 					prevNpt = { tokens: npt, at: now };
@@ -100,6 +115,8 @@ export const llamaCppAdapter: TelemetryAdapter = {
 				if (wasBusy) {
 					wasBusy = false;
 					prevNpt = undefined;
+					taskId = undefined;
+					samplesThisTask = 0;
 					awaitingTotals = hasMetrics;
 					if (!hasMetrics) {
 						emit({ kind: 'completed', stats: { model } });

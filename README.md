@@ -58,8 +58,8 @@ last-byte the decode duration, and `usage.completion_tokens` is guaranteed by
 the spec.
 
 `src/engines.ts` contains the detection registry — it fingerprints the engines
-above across their default ports in under 50ms. It is not yet wired to the
-status bar, so the engine is selected by setting rather than detected.
+above across their default ports in under 50ms. Engines listed as `via proxy`
+are recognised but skipped, with the reason written to the log.
 
 ## Run it
 
@@ -82,11 +82,34 @@ acceptance. Click to open the log.
 
 ## Settings
 
+By default nothing needs configuring — supported engines on well-known
+localhost ports are detected and watched automatically.
+
 | Setting | Default | |
 |---|---|---|
-| `inferenceHud.serverUrl` | `http://127.0.0.1:8000` | Base URL of the server to observe |
-| `inferenceHud.engine` | `mtplx` | Which engine to observe: `mtplx` or `llamacpp` |
+| `inferenceHud.endpoints` | `[]` | Servers to watch, always, even while unreachable |
+| `inferenceHud.autoDetect` | `true` | Also scan well-known localhost ports |
 | `inferenceHud.statusBarPriority` | `100` | Higher is further left |
+
+`endpoints` takes a plain URL to have the engine detected, or an object to pin
+it — needed for non-default ports, remote hosts, or when two engines share a
+default port:
+
+```jsonc
+"inferenceHud.endpoints": [
+  "http://127.0.0.1:8000",
+  { "url": "http://127.0.0.1:9090", "engine": "llamacpp" },
+  { "url": "http://box.local:8080", "label": "workstation" }
+]
+```
+
+Auto-detection only ever probes `127.0.0.1`. Remote servers must be listed
+explicitly, so the extension never scans your network.
+
+Several endpoints can be watched at once. Whichever one is generating owns the
+status bar, so the HUD follows the model you are actually using — VS Code
+exposes no API for reading the chat view's model picker, but the server reports
+which model served each request.
 
 ## Install locally
 

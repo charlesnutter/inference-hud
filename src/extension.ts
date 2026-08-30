@@ -1,22 +1,6 @@
 import * as vscode from 'vscode';
-import { CompletedStats, TelemetryAdapter, TelemetryEvent } from './adapter';
-import { mtplxAdapter } from './adapters/mtplx';
-import { llamaCppAdapter } from './adapters/llamacpp';
-
-/**
- * Adapters the status bar can drive, chosen by the `inferenceHud.engine`
- * setting. Automatic selection using the probes in `engines.ts` is not wired
- * up yet.
- */
-const ADAPTERS: Record<string, TelemetryAdapter> = {
-	mtplx: mtplxAdapter,
-	llamacpp: llamaCppAdapter
-};
-
-function currentAdapter(): TelemetryAdapter {
-	const id = vscode.workspace.getConfiguration('inferenceHud').get<string>('engine', 'mtplx');
-	return ADAPTERS[id] ?? mtplxAdapter;
-}
+import { CompletedStats, TelemetryEvent } from './adapter';
+import { EndpointConfig, ResolvedEndpoint, resolveEndpoints } from './endpoints';
 
 const RECONNECT_MIN_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
@@ -36,50 +20,68 @@ export function activate(context: vscode.ExtensionContext) {
 	item.command = 'inferenceHud.showLog';
 	item.show();
 
-	let adapter = currentAdapter();
-	const view = new StatusView(item, adapter.displayName);
-	view.setDisconnected();
-
+	const view = new StatusView(item);
 	let abort: AbortController | undefined;
 	let generation = 0;
 
-	function serverUrl(): string {
-		return vscode.workspace
-			.getConfiguration('inferenceHud')
-			.get<string>('serverUrl', 'http://127.0.0.1:8000')
-			.replace(/\/+$/, '');
-	}
-
-	async function connect(): Promise<void> {
+	async function restart(): Promise<void> {
 		const myGen = ++generation;
 		abort?.abort();
-		adapter = currentAdapter();
-		view.setEngine(adapter.displayName);
+		const ac = new AbortController();
+		abort = ac;
+
+		const cfg = vscode.workspace.getConfiguration('inferenceHud');
+		const { endpoints, unsupported } = await resolveEndpoints(
+			cfg.get<EndpointConfig[]>('endpoints', []),
+			cfg.get<boolean>('autoDetect', true)
+		);
+		if (myGen !== generation) {
+			return;
+		}
+
+		for (const u of unsupported) {
+			log.info(`skipping ${u.url} (${u.engineName}): ${u.reason}`);
+		}
+		view.setEndpoints(endpoints);
+
+		if (endpoints.length === 0) {
+			log.warn('no inference servers found; set inferenceHud.endpoints');
+			return;
+		}
+		log.info(
+			`watching ${endpoints.length} endpoint(s): ` +
+				endpoints.map(e => `${e.url} [${e.adapter.id}]`).join(', ')
+		);
+
+		// Every endpoint runs its own loop; one being down never stops another.
+		for (const endpoint of endpoints) {
+			void watch(endpoint, ac.signal, myGen);
+		}
+	}
+
+	async function watch(
+		endpoint: ResolvedEndpoint,
+		signal: AbortSignal,
+		myGen: number
+	): Promise<void> {
 		let delay = RECONNECT_MIN_MS;
-
-		while (myGen === generation) {
-			const url = serverUrl();
-			const ac = new AbortController();
-			abort = ac;
-
+		while (!signal.aborted && myGen === generation) {
 			try {
-				log.info(`[${adapter.id}] connecting to ${url}`);
-				await adapter.run(url, ac.signal, event => {
+				await endpoint.adapter.run(endpoint.url, signal, event => {
 					if (myGen !== generation) {
 						return;
 					}
-					delay = RECONNECT_MIN_MS; // real traffic — reset backoff
-					render(event, view, log);
+					delay = RECONNECT_MIN_MS;
+					render(endpoint, event, view, log);
 				});
 			} catch (err) {
-				if (myGen !== generation || ac.signal.aborted) {
+				if (signal.aborted || myGen !== generation) {
 					return;
 				}
-				view.setDisconnected(`unreachable at ${url}\n${err}`);
-				log.warn(`[${adapter.id}] ${err}`);
+				view.setDisconnected(endpoint, String(err));
+				log.warn(`[${endpoint.adapter.id}] ${endpoint.url}: ${err}`);
 			}
-
-			if (myGen !== generation) {
+			if (signal.aborted || myGen !== generation) {
 				return;
 			}
 			await new Promise(r => setTimeout(r, delay));
@@ -95,39 +97,44 @@ export function activate(context: vscode.ExtensionContext) {
 			abort?.abort();
 		}),
 		vscode.commands.registerCommand('inferenceHud.showLog', () => log.show()),
-		vscode.commands.registerCommand('inferenceHud.reconnect', () => void connect()),
+		vscode.commands.registerCommand('inferenceHud.reconnect', () => void restart()),
 		vscode.workspace.onDidChangeConfiguration(e => {
 			if (
-				e.affectsConfiguration('inferenceHud.serverUrl') ||
-				e.affectsConfiguration('inferenceHud.engine')
+				e.affectsConfiguration('inferenceHud.endpoints') ||
+				e.affectsConfiguration('inferenceHud.autoDetect')
 			) {
-				void connect();
+				void restart();
 			}
 		})
 	);
 
-	void connect();
+	void restart();
 }
 
 export function deactivate() {}
 
-function render(event: TelemetryEvent, view: StatusView, log: vscode.LogOutputChannel): void {
+function render(
+	endpoint: ResolvedEndpoint,
+	event: TelemetryEvent,
+	view: StatusView,
+	log: vscode.LogOutputChannel
+): void {
 	switch (event.kind) {
 		case 'connected':
-			view.setConnected();
-			break;
-		case 'prefill':
-			view.setPrefill(event.done, event.total);
+			view.setConnected(endpoint);
 			break;
 		case 'notice':
-			view.notice(event.level, event.message, log);
+			view.notice(endpoint, event.level, event.message, log);
+			break;
+		case 'prefill':
+			view.setPrefill(endpoint, event.done, event.total);
 			break;
 		case 'progress':
-			view.setProgress(event.completionTokens, event.decodeTokS);
+			view.setProgress(endpoint, event.completionTokens, event.decodeTokS);
 			break;
 		case 'completed':
-			view.setCompleted(event.stats);
-			log.info(summarize(event.stats));
+			view.setCompleted(endpoint, event.stats);
+			log.info(`[${endpoint.adapter.id}] ${summarize(event.stats)}`);
 			break;
 	}
 }
@@ -142,98 +149,184 @@ function summarize(s: CompletedStats): string {
 	);
 }
 
-/** Owns every pixel the extension puts on screen. */
+interface SourceState {
+	endpoint: ResolvedEndpoint;
+	connected: boolean;
+	/** Most recent completion from this endpoint. */
+	last?: CompletedStats;
+	/** Model id the server reported, once we've seen one. */
+	model?: string;
+}
+
+/**
+ * Renders several endpoints into one status bar item.
+ *
+ * Whichever endpoint most recently showed activity owns the display, which is
+ * what makes the HUD follow the model you're actually using without needing to
+ * know what the chat view has selected.
+ */
 class StatusView {
-	private last: CompletedStats | undefined;
+	private readonly sources = new Map<string, SourceState>();
 	private readonly seenNotices = new Set<string>();
+	/** URL of the endpoint currently owning the display. */
+	private active?: string;
 
-	constructor(
-		private readonly item: vscode.StatusBarItem,
-		private engine: string
-	) {}
-
-	setEngine(name: string): void {
-		this.engine = name;
+	constructor(private readonly item: vscode.StatusBarItem) {
+		this.repaintIdle();
 	}
 
-	setDisconnected(detail?: string): void {
-		this.item.text = `$(debug-disconnect) ${this.engine}`;
-		this.item.tooltip = detail ?? `${this.engine}: connecting…`;
+	setEndpoints(endpoints: readonly ResolvedEndpoint[]): void {
+		this.sources.clear();
+		this.active = undefined;
+		for (const endpoint of endpoints) {
+			this.sources.set(endpoint.url, { endpoint, connected: false });
+		}
+		this.repaintIdle();
 	}
 
-	setConnected(): void {
-		this.item.text = this.idleText();
-		this.item.tooltip = this.tooltip();
+	setConnected(endpoint: ResolvedEndpoint): void {
+		const s = this.source(endpoint);
+		s.connected = true;
+		this.repaintIdle();
 	}
 
-	setPrefill(done: number | null, total: number | null): void {
-		// Engines that chunk through the prompt don't know the total up front.
+	setDisconnected(endpoint: ResolvedEndpoint, detail: string): void {
+		const s = this.source(endpoint);
+		s.connected = false;
+		if (this.active === endpoint.url) {
+			this.active = undefined;
+		}
+		this.seenNotices.delete(`${endpoint.url}:${detail}`);
+		this.repaintIdle();
+	}
+
+	setPrefill(endpoint: ResolvedEndpoint, done: number | null, total: number | null): void {
+		this.active = endpoint.url;
 		this.item.text =
 			total === null
 				? `$(loading~spin) prefill ${done ?? 0} tok`
 				: `$(loading~spin) prefill ${done ?? 0}/${total}`;
+		this.item.tooltip = this.tooltip();
 	}
 
-	/** Surfaced once per distinct message so reconnects don't nag. */
-	notice(level: 'info' | 'warn', message: string, log: vscode.LogOutputChannel): void {
-		if (this.seenNotices.has(message)) {
-			return;
-		}
-		this.seenNotices.add(message);
-		if (level === 'warn') {
-			log.warn(message);
-			void vscode.window.showWarningMessage(`Inference HUD: ${message}`);
-		} else {
-			log.info(message);
-		}
-	}
-
-	setProgress(tokens: number, rate: number | null): void {
+	setProgress(endpoint: ResolvedEndpoint, tokens: number, rate: number | null): void {
+		this.active = endpoint.url;
 		this.item.text =
 			rate === null
 				? `$(loading~spin) ${tokens} tok`
 				: `$(zap) ${fmt(rate)} tok/s · ${tokens}`;
-	}
-
-	setCompleted(stats: CompletedStats): void {
-		this.last = stats;
-		this.item.text = this.idleText();
 		this.item.tooltip = this.tooltip();
 	}
 
-	private idleText(): string {
-		if (!this.last) {
-			return `$(zap) ${this.engine} idle`;
+	setCompleted(endpoint: ResolvedEndpoint, stats: CompletedStats): void {
+		const s = this.source(endpoint);
+		s.last = stats;
+		s.model = stats.model ?? s.model;
+		this.active = endpoint.url;
+		this.repaintIdle();
+	}
+
+	/** Deduped per endpoint so reconnects don't nag. */
+	notice(
+		endpoint: ResolvedEndpoint,
+		level: 'info' | 'warn',
+		message: string,
+		log: vscode.LogOutputChannel
+	): void {
+		const key = `${endpoint.url}:${message}`;
+		if (this.seenNotices.has(key)) {
+			return;
 		}
-		return `$(zap) ${fmt(this.last.decodeTokS)} tok/s · ${this.last.completionTokens ?? 0} tok`;
+		this.seenNotices.add(key);
+		if (level === 'warn') {
+			log.warn(`${endpoint.url}: ${message}`);
+			void vscode.window.showWarningMessage(`Inference HUD: ${message}`);
+		} else {
+			log.info(`${endpoint.url}: ${message}`);
+		}
+	}
+
+	private source(endpoint: ResolvedEndpoint): SourceState {
+		let s = this.sources.get(endpoint.url);
+		if (!s) {
+			s = { endpoint, connected: false };
+			this.sources.set(endpoint.url, s);
+		}
+		return s;
+	}
+
+	private repaintIdle(): void {
+		const all = [...this.sources.values()];
+		if (all.length === 0) {
+			this.item.text = '$(debug-disconnect) no engine';
+			this.item.tooltip = 'Inference HUD: no inference server found.';
+			return;
+		}
+		// Only claim disconnected when nothing at all is reachable.
+		if (!all.some(s => s.connected)) {
+			this.item.text = '$(debug-disconnect) Inference HUD';
+			this.item.tooltip = this.tooltip();
+			return;
+		}
+
+		const shown = this.activeSource() ?? all.find(s => s.last);
+		const last = shown?.last;
+		this.item.text = last
+			? `$(zap) ${fmt(last.decodeTokS)} tok/s · ${last.completionTokens ?? 0} tok`
+			: `$(zap) ${this.shortName(shown ?? all[0])} idle`;
+		this.item.tooltip = this.tooltip();
+	}
+
+	private activeSource(): SourceState | undefined {
+		return this.active ? this.sources.get(this.active) : undefined;
+	}
+
+	private shortName(s: SourceState): string {
+		return s.model ?? s.endpoint.label ?? s.endpoint.adapter.displayName;
 	}
 
 	private tooltip(): vscode.MarkdownString {
 		const md = new vscode.MarkdownString();
 		md.supportThemeIcons = true;
-		const s = this.last;
-		if (!s) {
-			md.appendMarkdown(`**${this.engine}** — connected, no requests yet.`);
-			return md;
+		const all = [...this.sources.values()];
+		const shown = this.activeSource() ?? all.find(s => s.last);
+
+		if (shown?.last) {
+			const s = shown.last;
+			md.appendMarkdown(`**${this.shortName(shown)}** — last request\n\n`);
+			md.appendMarkdown('| | |\n|---|---|\n');
+			md.appendMarkdown(`| Decode | **${fmt(s.decodeTokS, 2)} tok/s** |\n`);
+			md.appendMarkdown(`| End-to-end | ${fmt(s.requestTokS, 2)} tok/s |\n`);
+			md.appendMarkdown(
+				`| Generated | ${s.completionTokens ?? 0} tokens in ${fmt(s.decodeElapsedS, 2)}s |\n`
+			);
+			md.appendMarkdown(`| TTFT | ${fmt(s.ttftS, 3)}s |\n`);
+			md.appendMarkdown(
+				`| Prefill | ${s.promptTokens ?? 0} tokens @ ${fmt(s.prefillTokS, 0)} tok/s |\n`
+			);
+			md.appendMarkdown(
+				`| Cache | ${s.cachedTokens ?? 0} cached (${s.cacheSource ?? 'none'}) |\n`
+			);
+			md.appendMarkdown(`| Context | ${s.contextLen ?? 0} tokens |\n`);
+			for (const [label, value] of Object.entries(s.extra ?? {})) {
+				md.appendMarkdown(`| ${label} | ${value} |\n`);
+			}
+			md.appendMarkdown(`| Total | ${fmt(s.requestElapsedS, 2)}s |\n`);
+		} else {
+			md.appendMarkdown('**Inference HUD** — no requests seen yet.\n');
 		}
 
-		md.appendMarkdown(`**${s.model ?? this.engine}** — last request\n\n`);
-		md.appendMarkdown('| | |\n|---|---|\n');
-		md.appendMarkdown(`| Decode | **${fmt(s.decodeTokS, 2)} tok/s** |\n`);
-		md.appendMarkdown(`| End-to-end | ${fmt(s.requestTokS, 2)} tok/s |\n`);
-		md.appendMarkdown(
-			`| Generated | ${s.completionTokens ?? 0} tokens in ${fmt(s.decodeElapsedS, 2)}s |\n`
-		);
-		md.appendMarkdown(`| TTFT | ${fmt(s.ttftS, 3)}s |\n`);
-		md.appendMarkdown(
-			`| Prefill | ${s.promptTokens ?? 0} tokens @ ${fmt(s.prefillTokS, 0)} tok/s |\n`
-		);
-		md.appendMarkdown(`| Cache | ${s.cachedTokens ?? 0} cached (${s.cacheSource ?? 'none'}) |\n`);
-		md.appendMarkdown(`| Context | ${s.contextLen ?? 0} tokens |\n`);
-		for (const [label, value] of Object.entries(s.extra ?? {})) {
-			md.appendMarkdown(`| ${label} | ${value} |\n`);
+		if (all.length > 1 || !shown?.last) {
+			md.appendMarkdown('\n**Endpoints**\n\n');
+			for (const s of all) {
+				const dot = s.connected ? '$(pass-filled)' : '$(circle-slash)';
+				const mark = s.endpoint.url === this.active ? ' ←' : '';
+				const how = s.endpoint.detected ? 'detected' : 'configured';
+				md.appendMarkdown(
+					`- ${dot} \`${s.endpoint.url}\` — ${s.endpoint.adapter.displayName} (${how})${mark}\n`
+				);
+			}
 		}
-		md.appendMarkdown(`| Total | ${fmt(s.requestElapsedS, 2)}s |\n`);
 		return md;
 	}
 }

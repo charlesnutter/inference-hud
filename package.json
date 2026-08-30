@@ -55,23 +55,50 @@
     "configuration": {
       "title": "Inference HUD",
       "properties": {
-        "inferenceHud.serverUrl": {
-          "type": "string",
-          "default": "http://127.0.0.1:8000",
-          "description": "Base URL of the local inference server to observe."
+        "inferenceHud.endpoints": {
+          "type": "array",
+          "default": [],
+          "markdownDescription": "Inference servers to watch. Use a plain URL string to have the engine detected, or an object to pin it:\n\n```json\n[\n  \"http://127.0.0.1:8000\",\n  { \"url\": \"http://127.0.0.1:9090\", \"engine\": \"llamacpp\" },\n  { \"url\": \"http://box.local:8080\", \"label\": \"workstation\" }\n]\n```\n\nEntries listed here are always watched, even while unreachable.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uri",
+                "description": "Base URL; the engine is detected automatically."
+              },
+              {
+                "type": "object",
+                "required": [
+                  "url"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "Base URL of the server."
+                  },
+                  "engine": {
+                    "type": "string",
+                    "enum": [
+                      "mtplx",
+                      "llamacpp"
+                    ],
+                    "description": "Pin the engine instead of detecting it."
+                  },
+                  "label": {
+                    "type": "string",
+                    "description": "Name shown in the tooltip."
+                  }
+                }
+              }
+            ]
+          }
         },
-        "inferenceHud.engine": {
-          "type": "string",
-          "enum": [
-            "mtplx",
-            "llamacpp"
-          ],
-          "enumDescriptions": [
-            "MTPLX \u2014 per-request telemetry pushed over SSE.",
-            "llama.cpp \u2014 polls /slots for live progress and /metrics for totals (start llama-server with --metrics)."
-          ],
-          "default": "mtplx",
-          "description": "Which inference engine to observe at the configured server URL."
+        "inferenceHud.autoDetect": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Scan well-known ports on `127.0.0.1` for supported engines and watch whatever is found. Only localhost is ever scanned; remote servers must be listed in `#inferenceHud.endpoints#`."
         },
         "inferenceHud.statusBarPriority": {
           "type": "number",

@@ -87,7 +87,8 @@ export const ENGINES: readonly EngineAdapter[] = [
 		async probe(base, signal) {
 			const props = await getJson(`${base}/props`, signal);
 			if (props && ('default_generation_settings' in props || 'model_path' in props)) {
-				return props.model_path ?? props.default_generation_settings?.model ?? 'llama.cpp';
+				const path = props.model_path ?? props.model_alias ?? '';
+				return path.split('/').pop() || 'llama.cpp';
 			}
 			return null;
 		}
@@ -158,8 +159,30 @@ export interface Detected {
 }
 
 /**
- * Scan candidate ports. Specific engines are probed before the generic
- * OpenAI fallback, and the first match per port wins.
+ * Identify whichever engine is serving `baseUrl`, if any. Specific engines are
+ * tried before the generic OpenAI fallback, so the first match wins.
+ */
+export async function probeOne(baseUrl: string, timeoutMs = 800): Promise<Detected | null> {
+	for (const engine of ENGINES) {
+		const ac = new AbortController();
+		const timer = setTimeout(() => ac.abort(), timeoutMs);
+		try {
+			const label = await engine.probe(baseUrl, ac.signal);
+			if (label !== null) {
+				return { engine, baseUrl, label };
+			}
+		} catch {
+			/* unreachable, or simply not this engine */
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+	return null;
+}
+
+/**
+ * Scan candidate ports on localhost. Remote hosts are never scanned — they
+ * must be configured explicitly, so the extension never probes the network.
  */
 export async function detect(
 	extraPorts: readonly number[] = [],
@@ -170,21 +193,9 @@ export async function detect(
 
 	await Promise.all(
 		ports.map(async port => {
-			const baseUrl = `http://127.0.0.1:${port}`;
-			for (const engine of ENGINES) {
-				const ac = new AbortController();
-				const timer = setTimeout(() => ac.abort(), timeoutMs);
-				try {
-					const label = await engine.probe(baseUrl, ac.signal);
-					if (label !== null) {
-						found.push({ engine, baseUrl, label });
-						return; // first (most specific) match wins for this port
-					}
-				} catch {
-					/* unreachable or not this engine */
-				} finally {
-					clearTimeout(timer);
-				}
+			const hit = await probeOne(`http://127.0.0.1:${port}`, timeoutMs);
+			if (hit) {
+				found.push(hit);
 			}
 		})
 	);
