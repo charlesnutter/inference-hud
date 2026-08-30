@@ -2,6 +2,7 @@
 src/**
 node_modules/**
 tsconfig.json
+TODO.md
 **/*.map
 **/*.ts
 .gitignore
