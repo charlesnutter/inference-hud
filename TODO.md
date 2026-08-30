@@ -27,6 +27,43 @@ See the support matrix in README.md. The detection registry in
 (llama.cpp `/slots`, vLLM `/metrics`) is the next highest-value piece —
 it brings two engines in with no user configuration.
 
+## llama.cpp: verified behaviour (tested 2026-08-29, build b9860)
+
+Tested live against `llama-server` with a 0.5B GGUF. **The server README's
+`/slots` description does not match this build** - there is no `next_token`
+object and no `n_decoded` field. Verified shapes:
+
+`GET /slots`
+- Idle: 4 keys only (`id`, `is_processing`, `n_ctx`, `speculative`). No token
+  data whatsoever - cannot even show the previous request's result.
+- Busy: 10 keys, adds `id_task`, `n_prompt_tokens`,
+  `n_prompt_tokens_processed`, `n_prompt_tokens_cache`, `params`.
+- `n_prompt_tokens` **increments live** during generation and counts prompt +
+  generated together (observed 80 -> 169 -> 259 -> 349 -> 439 over ~1.1s).
+  Differencing it gives a live rate but conflates prefill with decode.
+
+`GET /metrics` (requires `--metrics`; **off by default**)
+- Metric names in the README are accurate. Confirmed present:
+  `llamacpp:tokens_predicted_total`, `llamacpp:tokens_predicted_seconds_total`,
+  `llamacpp:predicted_tokens_seconds`, `llamacpp:prompt_tokens_seconds`,
+  `llamacpp:requests_processing`, `llamacpp:n_decode_total`.
+- **`predicted_tokens_seconds` is a lifetime average, not current speed** -
+  exactly `tokens_predicted_total / tokens_predicted_seconds_total` since
+  server start. Do not display it as live throughput.
+- Live rate must come from differencing:
+  `d(tokens_predicted_total) / d(tokens_predicted_seconds_total)`.
+  Measured 330.2 tok/s this way against a true rate of ~330.
+- **Counters only update at request completion.** Through a 4-second
+  generation `tokens_predicted_total` stayed frozen, then jumped by the full
+  1200 tokens once finished. `requests_processing` correctly read 1 throughout.
+
+Consequence: the llama.cpp adapter needs **both** endpoints - `/slots` for
+live progress during generation, `/metrics` for accurate totals at completion -
+and `--metrics` is not on by default, so setup means adding a flag and
+restarting the server.
+
+Test model kept at `~/models/gguf/qwen2.5-0.5b-instruct-q4_k_m.gguf` (469 MB).
+
 ## Prior art (surveyed 2026-08-28)
 
 Nothing found that occupies this niche. Closest neighbours:
