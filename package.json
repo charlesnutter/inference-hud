@@ -1,26 +1,56 @@
 {
   "name": "inference-hud",
-  "displayName": "Inference HUD — local LLM tokens/sec",
+  "displayName": "Inference HUD \u2014 local LLM tokens/sec",
   "description": "Live tokens/sec, token counts, and time-to-first-token for local inference servers, in the status bar.",
   "version": "0.0.1",
   "publisher": "charlesnutter",
   "license": "MIT",
   "author": "Charles Nutter",
-  "repository": { "type": "git", "url": "https://github.com/charlesnutter/inference-hud.git" },
-  "bugs": { "url": "https://github.com/charlesnutter/inference-hud/issues" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/charlesnutter/inference-hud.git"
+  },
+  "bugs": {
+    "url": "https://github.com/charlesnutter/inference-hud/issues"
+  },
   "homepage": "https://github.com/charlesnutter/inference-hud#readme",
-  "engines": { "vscode": "^1.134.0" },
-  "categories": ["Other", "Machine Learning"],
-  "keywords": [
-    "llm", "local", "tokens per second", "tok/s", "throughput", "inference",
-    "ollama", "llama.cpp", "mlx", "vllm", "lm studio", "mtplx", "status bar", "hud"
+  "engines": {
+    "vscode": "^1.134.0"
+  },
+  "categories": [
+    "Other",
+    "Machine Learning"
   ],
-  "activationEvents": ["onStartupFinished"],
+  "keywords": [
+    "llm",
+    "local",
+    "tokens per second",
+    "tok/s",
+    "throughput",
+    "inference",
+    "ollama",
+    "llama.cpp",
+    "mlx",
+    "vllm",
+    "lm studio",
+    "mtplx",
+    "status bar",
+    "hud"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
-      { "command": "inferenceHud.showLog", "title": "Inference HUD: Show Log" },
-      { "command": "inferenceHud.reconnect", "title": "Inference HUD: Reconnect" }
+      {
+        "command": "inferenceHud.showLog",
+        "title": "Inference HUD: Show Log"
+      },
+      {
+        "command": "inferenceHud.reconnect",
+        "title": "Inference HUD: Reconnect"
+      }
     ],
     "configuration": {
       "title": "Inference HUD",
@@ -29,6 +59,19 @@
           "type": "string",
           "default": "http://127.0.0.1:8000",
           "description": "Base URL of the local inference server to observe."
+        },
+        "inferenceHud.engine": {
+          "type": "string",
+          "enum": [
+            "mtplx",
+            "llamacpp"
+          ],
+          "enumDescriptions": [
+            "MTPLX \u2014 per-request telemetry pushed over SSE.",
+            "llama.cpp \u2014 polls /slots for live progress and /metrics for totals (start llama-server with --metrics)."
+          ],
+          "default": "mtplx",
+          "description": "Which inference engine to observe at the configured server URL."
         },
         "inferenceHud.statusBarPriority": {
           "type": "number",

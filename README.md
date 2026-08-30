@@ -28,12 +28,15 @@ mtplx_stats:  {ttft_s: 0.782, decode_tok_s: 40.49, request_elapsed_s: 3.74, ...}
 
 ## Status
 
-Early. MTPLX works end to end; broader engine support is in progress.
+Early. MTPLX and llama.cpp work end to end; broader engine support is in progress.
+
+Start `llama-server` with `--metrics` — without it the HUD still shows live
+progress from `/slots`, but per-request totals are unavailable and it will say so.
 
 | Engine | Passive telemetry | Enabled by default | Supported |
 |---|---|---|---|
 | **MTPLX** | `/v1/mtplx/metrics/stream` (SSE, per-request) | yes | ✅ |
-| **llama.cpp** | `/slots`, or `/metrics` with `--metrics` | `/slots` yes, `/metrics` no | planned |
+| **llama.cpp** | `/slots` for live progress + `/metrics` for totals | `/slots` yes, `/metrics` **no** | ✅ |
 | **vLLM / SGLang** | `/metrics` (Prometheus) | yes | planned |
 | **oMLX** | `/admin/api/stats` (needs admin auth) | yes, gated | planned |
 | **Ollama** | none — no `/metrics` endpoint | — | via proxy |
@@ -56,7 +59,7 @@ the spec.
 
 `src/engines.ts` contains the detection registry — it fingerprints the engines
 above across their default ports in under 50ms. It is not yet wired to the
-status bar.
+status bar, so the engine is selected by setting rather than detected.
 
 ## Run it
 
@@ -82,6 +85,7 @@ acceptance. Click to open the log.
 | Setting | Default | |
 |---|---|---|
 | `inferenceHud.serverUrl` | `http://127.0.0.1:8000` | Base URL of the server to observe |
+| `inferenceHud.engine` | `mtplx` | Which engine to observe: `mtplx` or `llamacpp` |
 | `inferenceHud.statusBarPriority` | `100` | Higher is further left |
 
 ## Install locally

@@ -1,12 +1,22 @@
 import * as vscode from 'vscode';
 import { CompletedStats, TelemetryAdapter, TelemetryEvent } from './adapter';
 import { mtplxAdapter } from './adapters/mtplx';
+import { llamaCppAdapter } from './adapters/llamacpp';
 
 /**
- * Adapters available to the status bar. Only MTPLX is implemented; detection
- * across several engines lives in `engines.ts` and is not wired up yet.
+ * Adapters the status bar can drive, chosen by the `inferenceHud.engine`
+ * setting. Automatic selection using the probes in `engines.ts` is not wired
+ * up yet.
  */
-const ADAPTER: TelemetryAdapter = mtplxAdapter;
+const ADAPTERS: Record<string, TelemetryAdapter> = {
+	mtplx: mtplxAdapter,
+	llamacpp: llamaCppAdapter
+};
+
+function currentAdapter(): TelemetryAdapter {
+	const id = vscode.workspace.getConfiguration('inferenceHud').get<string>('engine', 'mtplx');
+	return ADAPTERS[id] ?? mtplxAdapter;
+}
 
 const RECONNECT_MIN_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
@@ -26,7 +36,8 @@ export function activate(context: vscode.ExtensionContext) {
 	item.command = 'inferenceHud.showLog';
 	item.show();
 
-	const view = new StatusView(item, ADAPTER.displayName);
+	let adapter = currentAdapter();
+	const view = new StatusView(item, adapter.displayName);
 	view.setDisconnected();
 
 	let abort: AbortController | undefined;
@@ -42,6 +53,8 @@ export function activate(context: vscode.ExtensionContext) {
 	async function connect(): Promise<void> {
 		const myGen = ++generation;
 		abort?.abort();
+		adapter = currentAdapter();
+		view.setEngine(adapter.displayName);
 		let delay = RECONNECT_MIN_MS;
 
 		while (myGen === generation) {
@@ -50,8 +63,8 @@ export function activate(context: vscode.ExtensionContext) {
 			abort = ac;
 
 			try {
-				log.info(`[${ADAPTER.id}] connecting to ${url}`);
-				await ADAPTER.run(url, ac.signal, event => {
+				log.info(`[${adapter.id}] connecting to ${url}`);
+				await adapter.run(url, ac.signal, event => {
 					if (myGen !== generation) {
 						return;
 					}
@@ -63,7 +76,7 @@ export function activate(context: vscode.ExtensionContext) {
 					return;
 				}
 				view.setDisconnected(`unreachable at ${url}\n${err}`);
-				log.warn(`[${ADAPTER.id}] ${err}`);
+				log.warn(`[${adapter.id}] ${err}`);
 			}
 
 			if (myGen !== generation) {
@@ -84,7 +97,10 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('inferenceHud.showLog', () => log.show()),
 		vscode.commands.registerCommand('inferenceHud.reconnect', () => void connect()),
 		vscode.workspace.onDidChangeConfiguration(e => {
-			if (e.affectsConfiguration('inferenceHud.serverUrl')) {
+			if (
+				e.affectsConfiguration('inferenceHud.serverUrl') ||
+				e.affectsConfiguration('inferenceHud.engine')
+			) {
 				void connect();
 			}
 		})
@@ -102,6 +118,9 @@ function render(event: TelemetryEvent, view: StatusView, log: vscode.LogOutputCh
 			break;
 		case 'prefill':
 			view.setPrefill(event.done, event.total);
+			break;
+		case 'notice':
+			view.notice(event.level, event.message, log);
 			break;
 		case 'progress':
 			view.setProgress(event.completionTokens, event.decodeTokS);
@@ -126,11 +145,16 @@ function summarize(s: CompletedStats): string {
 /** Owns every pixel the extension puts on screen. */
 class StatusView {
 	private last: CompletedStats | undefined;
+	private readonly seenNotices = new Set<string>();
 
 	constructor(
 		private readonly item: vscode.StatusBarItem,
-		private readonly engine: string
+		private engine: string
 	) {}
+
+	setEngine(name: string): void {
+		this.engine = name;
+	}
 
 	setDisconnected(detail?: string): void {
 		this.item.text = `$(debug-disconnect) ${this.engine}`;
@@ -142,8 +166,26 @@ class StatusView {
 		this.item.tooltip = this.tooltip();
 	}
 
-	setPrefill(done: number | null, total: number): void {
-		this.item.text = `$(loading~spin) prefill ${done ?? 0}/${total}`;
+	setPrefill(done: number | null, total: number | null): void {
+		// Engines that chunk through the prompt don't know the total up front.
+		this.item.text =
+			total === null
+				? `$(loading~spin) prefill ${done ?? 0} tok`
+				: `$(loading~spin) prefill ${done ?? 0}/${total}`;
+	}
+
+	/** Surfaced once per distinct message so reconnects don't nag. */
+	notice(level: 'info' | 'warn', message: string, log: vscode.LogOutputChannel): void {
+		if (this.seenNotices.has(message)) {
+			return;
+		}
+		this.seenNotices.add(message);
+		if (level === 'warn') {
+			log.warn(message);
+			void vscode.window.showWarningMessage(`Inference HUD: ${message}`);
+		} else {
+			log.info(message);
+		}
 	}
 
 	setProgress(tokens: number, rate: number | null): void {

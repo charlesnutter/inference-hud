@@ -32,12 +32,22 @@ export interface CompletedStats {
 export type TelemetryEvent =
 	/** The adapter has a working connection. */
 	| { kind: 'connected' }
-	/** Prompt processing. `done` is null when the engine reports no progress. */
-	| { kind: 'prefill'; done: number | null; total: number }
+	/**
+	 * Prompt processing. `done` is null when the engine reports no progress;
+	 * `total` is null when it does not know the prompt length up front, as
+	 * llama.cpp does not — it discovers the size as it chunks through.
+	 */
+	| { kind: 'prefill'; done: number | null; total: number | null }
 	/** Token generation in flight. `decodeTokS` is null before a rate exists. */
 	| { kind: 'progress'; completionTokens: number; decodeTokS: number | null }
 	/** A generation finished. */
-	| { kind: 'completed'; stats: CompletedStats };
+	| { kind: 'completed'; stats: CompletedStats }
+	/**
+	 * Something the user should know — a missing server flag, a degraded mode.
+	 * Adapters surface these rather than importing vscode, which keeps them
+	 * runnable (and testable) outside the extension host.
+	 */
+	| { kind: 'notice'; level: 'info' | 'warn'; message: string };
 
 export type Emit = (event: TelemetryEvent) => void;
 
