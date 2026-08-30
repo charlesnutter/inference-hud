@@ -20,6 +20,19 @@ Notes only — nothing here is implemented or scheduled.
 
 - Other metrics to surface: TBD.
 
+- **A UI for editing endpoints.** VS Code's settings editor renders arrays of
+  objects as a bare "Edit in settings.json" link, so `inferenceHud.endpoints`
+  will be unpleasant to configure through the normal Settings pane. Options,
+  cheapest first:
+  1. A `Inference HUD: Select Endpoint` QuickPick listing detected and
+     configured endpoints, with the engine and reachability shown per row.
+  2. An `Inference HUD: Add Endpoint` input flow that probes the URL and
+     pins the engine it finds.
+  3. A tree view in the sidebar listing endpoints with live state.
+  4. A webview settings page - most control, most maintenance.
+  Credentials (oMLX needs an admin key) must go in `SecretStorage`, never in
+  settings.json, so any such UI needs a secure input path anyway.
+
 ## Engine support
 
 See the support matrix in README.md. The detection registry in
