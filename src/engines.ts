@@ -23,9 +23,16 @@ export interface EngineAdapter {
 	probe(base: string, signal: AbortSignal): Promise<string | null>;
 }
 
+// A fresh connection per probe. Node's fetch pools keep-alive sockets, and a
+// pooled socket the server is concurrently closing can stall a request for
+// hundreds of milliseconds — enough to trip the probe timeout and report a
+// running engine as absent.
 async function getJson(url: string, signal: AbortSignal): Promise<any | null> {
 	try {
-		const res = await fetch(url, { signal, headers: { accept: 'application/json' } });
+		const res = await fetch(url, {
+			signal,
+			headers: { accept: 'application/json', connection: 'close' }
+		});
 		if (!res.ok) {
 			return null;
 		}
@@ -37,7 +44,7 @@ async function getJson(url: string, signal: AbortSignal): Promise<any | null> {
 
 async function getText(url: string, signal: AbortSignal): Promise<string | null> {
 	try {
-		const res = await fetch(url, { signal });
+		const res = await fetch(url, { signal, headers: { connection: 'close' } });
 		if (!res.ok) {
 			return null;
 		}

@@ -211,9 +211,20 @@ function parsePrometheus(text: string): Record<string, number> {
 	return out;
 }
 
+/**
+ * Every poll opens a fresh connection deliberately. Node's fetch pools
+ * keep-alive sockets, and at polling intervals the pool races the server
+ * closing its idle connection: measured against llama-server, `/slots` reads
+ * that take 2-4ms on a new connection instead take 180-200ms through the pool,
+ * with spikes past 1.7s. That silently halved the effective poll rate and made
+ * the differenced decode rate jittery.
+ */
 async function getJson(url: string, signal: AbortSignal): Promise<any | null> {
 	try {
-		const res = await fetch(url, { signal, headers: { accept: 'application/json' } });
+		const res = await fetch(url, {
+			signal,
+			headers: { accept: 'application/json', connection: 'close' }
+		});
 		return res.ok ? await res.json() : null;
 	} catch {
 		return null;
@@ -222,7 +233,7 @@ async function getJson(url: string, signal: AbortSignal): Promise<any | null> {
 
 async function getText(url: string, signal: AbortSignal): Promise<string | null> {
 	try {
-		const res = await fetch(url, { signal });
+		const res = await fetch(url, { signal, headers: { connection: 'close' } });
 		return res.ok ? await res.text() : null;
 	} catch {
 		return null;
