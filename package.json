@@ -82,7 +82,9 @@
                     "type": "string",
                     "enum": [
                       "mtplx",
-                      "llamacpp"
+                      "llamacpp",
+                      "vllm",
+                      "sglang"
                     ],
                     "description": "Pin the engine instead of detecting it."
                   },

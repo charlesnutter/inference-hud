@@ -28,7 +28,9 @@ mtplx_stats:  {ttft_s: 0.782, decode_tok_s: 40.49, request_elapsed_s: 3.74, ...}
 
 ## Status
 
-Early. MTPLX and llama.cpp work end to end; broader engine support is in progress.
+Early. MTPLX, llama.cpp and vLLM work end to end. SGLang shares vLLM's adapter
+and is written against its published metric definitions, but has not been run
+against a live server yet.
 
 Start `llama-server` with `--metrics` — without it the HUD still shows live
 progress from `/slots`, but per-request totals are unavailable and it will say so.
@@ -37,7 +39,8 @@ progress from `/slots`, but per-request totals are unavailable and it will say s
 |---|---|---|---|
 | **MTPLX** | `/v1/mtplx/metrics/stream` (SSE, per-request) | yes | ✅ |
 | **llama.cpp** | `/slots` for live progress + `/metrics` for totals | `/slots` yes, `/metrics` **no** | ✅ |
-| **vLLM / SGLang** | `/metrics` (Prometheus) | yes | planned |
+| **vLLM** | `/metrics` (Prometheus) | yes | ✅ |
+| **SGLang** | `/metrics` (Prometheus) | yes | ⚠️ untested against a live server |
 | **oMLX** | `/admin/api/stats` (needs admin auth) | yes, gated | planned |
 | **Ollama** | none — no `/metrics` endpoint | — | via proxy |
 | **LM Studio** | none — per-response `stats` only | — | via proxy |
@@ -48,6 +51,15 @@ Engines split into two classes, and the split drives the design:
   just listens. It never sits in the request path and the client never knows it
   exists. MTPLX pushes over SSE; llama.cpp, vLLM and SGLang expose counters to
   poll and difference.
+
+  How much polling recovers varies more than the shared endpoint suggests.
+  vLLM's counters advance *during* generation, so `/metrics` alone drives a live
+  readout; llama.cpp's stay frozen until a request ends, so it needs `/slots`
+  for progress and `/metrics` for totals. SGLang goes furthest and publishes
+  `sglang:gen_throughput` as a gauge, so its rate needs no differencing at all.
+  On both Prometheus engines time-to-first-token is a Histogram, so only a
+  running average is recoverable — never the last request's value — and the HUD
+  labels it as such rather than showing it as a per-request figure.
 - **Proxy-only** — telemetry is returned solely to whoever made the request.
   Ollama's `eval_count`/`eval_duration` go to the caller and nowhere else, and it
   serves no `/metrics` at all. Observing these means forwarding the request.

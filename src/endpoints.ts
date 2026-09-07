@@ -1,12 +1,15 @@
 import { TelemetryAdapter } from './adapter';
 import { mtplxAdapter } from './adapters/mtplx';
 import { llamaCppAdapter } from './adapters/llamacpp';
+import { vllmAdapter, sglangAdapter } from './adapters/prometheus';
 import { detect, probeOne } from './engines';
 
 /** Engines with a working telemetry adapter, keyed by their `engines.ts` id. */
 export const ADAPTERS: Record<string, TelemetryAdapter> = {
 	mtplx: mtplxAdapter,
-	llamacpp: llamaCppAdapter
+	llamacpp: llamaCppAdapter,
+	vllm: vllmAdapter,
+	sglang: sglangAdapter
 };
 
 /** One entry of the `inferenceHud.endpoints` setting. */

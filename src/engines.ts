@@ -54,6 +54,16 @@ async function getText(url: string, signal: AbortSignal): Promise<string | null>
 	}
 }
 
+/**
+ * Both Prometheus engines label every series with the model they serve, so the
+ * name is available before any request has been made — the same identity the
+ * adapter later reports through `CompletedStats.model`.
+ */
+function modelFromMetrics(text: string): string | null {
+	const m = /model_name="((?:[^"\\]|\\.)*)"/.exec(text);
+	return m ? m[1].replace(/\\(.)/g, '$1') : null;
+}
+
 export const ENGINES: readonly EngineAdapter[] = [
 	{
 		id: 'mtplx',
@@ -108,7 +118,7 @@ export const ENGINES: readonly EngineAdapter[] = [
 		telemetryPath: '/metrics',
 		async probe(base, signal) {
 			const t = await getText(`${base}/metrics`, signal);
-			return t?.includes('vllm:') ? 'vLLM' : null;
+			return t?.includes('vllm:') ? modelFromMetrics(t) ?? 'vLLM' : null;
 		}
 	},
 	{
@@ -119,7 +129,7 @@ export const ENGINES: readonly EngineAdapter[] = [
 		telemetryPath: '/metrics',
 		async probe(base, signal) {
 			const t = await getText(`${base}/metrics`, signal);
-			return t?.includes('sglang:') ? 'SGLang' : null;
+			return t?.includes('sglang:') ? modelFromMetrics(t) ?? 'SGLang' : null;
 		}
 	},
 	{

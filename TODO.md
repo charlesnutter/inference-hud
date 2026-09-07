@@ -77,6 +77,31 @@ restarting the server.
 
 Test model kept at `~/models/gguf/qwen2.5-0.5b-instruct-q4_k_m.gguf` (469 MB).
 
+## vLLM: verified behaviour (tested 2026-09-07, 0.1.dev1+g51da0ca66 CPU build)
+
+`GET /metrics` is on by default and is the only endpoint needed.
+
+- **Counters advance during generation**, unlike llama.cpp. Polling a 300-token
+  run once a second gave a clean ramp, `generation_tokens_total` 25 -> 300 with
+  deltas holding at 40-41 tok/s. So one endpoint, differenced, drives both the
+  live readout and the totals.
+- `prompt_tokens_total` jumps atomically to the full prompt length; prefill is
+  a single scheduled step, so there is no partial progress to show.
+- The exposed names carry `_total` appended by the Prometheus client, and every
+  series is labelled `{engine="0",model_name="..."}`. Each counter also emits a
+  `_created` line holding a unix timestamp — do not read it as a value.
+- **TTFT is a Histogram.** `_sum`/`_count` gives a running average over all
+  requests since start; the last request's value is not recoverable. Surfaced
+  as an `extra` row labelled as an average, never as `ttftS`.
+- No throughput gauge, unlike SGLang — the rate must be differenced.
+
+**SGLang is written but unverified.** It has no macOS backend, so the adapter
+was built from the metric definitions in `metrics_collector.py` at
+`sgl-project/sglang` `dcebe8c` and tested against a fixture replay only. It
+publishes `sglang:gen_throughput` as a gauge, which the adapter prefers over
+differencing, and splits `cached_tokens_total` by a `cache_source` label. Run it
+against a real server before trusting it.
+
 ## Prior art (surveyed 2026-08-28)
 
 Nothing found that occupies this niche. Closest neighbours:
