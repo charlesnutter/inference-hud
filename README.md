@@ -87,10 +87,21 @@ Copilot Agent mode with your local endpoint selected.
 |---|---|
 | Prefill | `prefill 176/177` |
 | Decoding | `⚡ 40.9 tok/s · 114` |
-| Done | `⚡ 40.5 tok/s · 120 tok` |
+| Done | `⚡ qwen2.5-0.5b · 40.5 tok/s · 120 tok` |
 
 Hover for TTFT, prefill rate, cache hits, context length, and speculative-decode
 acceptance. Click to open the log.
+
+Copilot is not required to exercise it. The extension watches the *server*, so
+traffic from any client moves the display — `scripts/drive.sh` sends prompts to
+whatever is running and is the quicker loop:
+
+```bash
+./scripts/drive.sh --list          # what is reachable
+./scripts/drive.sh                 # one prompt to every engine found
+./scripts/drive.sh --warm          # same prompt twice, for the cache path
+./scripts/drive.sh --alternate 3   # cycle engines, to watch the display switch
+```
 
 ## Settings
 

@@ -7,3 +7,4 @@ TODO.md
 **/*.ts
 .gitignore
 fixtures/**
+scripts/**
