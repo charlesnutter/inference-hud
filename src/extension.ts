@@ -139,13 +139,43 @@ function render(
 	}
 }
 
-const fmt = (n: number | undefined | null, digits = 1) =>
-	typeof n === 'number' && isFinite(n) ? n.toFixed(digits) : '—';
+/**
+ * A measurement with its unit, where a missing value renders as a bare dash.
+ * Appending the unit unconditionally produces `—s` and `— tok/s`, which read
+ * as a malformed number rather than as "this engine does not report it" —
+ * a distinction that matters here, since several fields are genuinely absent
+ * on some engines: llama.cpp publishes no time-to-first-token at all.
+ */
+const unit = (n: number | undefined | null, suffix: string, digits = 1) =>
+	typeof n === 'number' && isFinite(n) ? `${n.toFixed(digits)}${suffix}` : '—';
+
+/** Longest model name the status bar will carry before it is elided. */
+const MODEL_BUDGET = 20;
+
+/**
+ * Model ids are far longer than a status bar can spare once it also carries a
+ * rate and a token count, so trim them to the part that actually identifies
+ * the model: `Qwen/Qwen2.5-0.5B-Instruct` and
+ * `qwen2.5-0.5b-instruct-q4_k_m.gguf` both reduce to a recognisable stem.
+ *
+ * Only affixes that carry no identity are dropped — namespace, file extension,
+ * quantisation tag, and the role suffix nearly every instruct model shares.
+ * Anything still over budget is elided rather than trimmed further, since
+ * beyond this point the remaining characters are what tell two models apart.
+ * The untouched id is always in the tooltip.
+ */
+function shortModel(name: string): string {
+	let s = name.split('/').pop() ?? name;
+	s = s.replace(/\.(gguf|safetensors|bin|pt)$/i, '');
+	s = s.replace(/-(q\d+[a-z0-9_]*|f16|bf16|fp16|fp8|int[48])$/i, '');
+	s = s.replace(/-(instruct|chat|it)$/i, '');
+	return s.length > MODEL_BUDGET ? `${s.slice(0, MODEL_BUDGET - 1)}…` : s;
+}
 
 function summarize(s: CompletedStats): string {
 	return (
-		`done · ${fmt(s.decodeTokS, 2)} tok/s · ${s.completionTokens ?? 0} out / ` +
-		`${s.promptTokens ?? 0} in · ttft ${fmt(s.ttftS, 3)}s · total ${fmt(s.requestElapsedS, 2)}s`
+		`done · ${unit(s.decodeTokS, ' tok/s', 2)} · ${s.completionTokens ?? 0} out / ` +
+		`${s.promptTokens ?? 0} in · ttft ${unit(s.ttftS, 's', 3)} · total ${unit(s.requestElapsedS, 's', 2)}`
 	);
 }
 
@@ -214,7 +244,7 @@ class StatusView {
 		this.item.text =
 			rate === null
 				? `$(loading~spin) ${tokens} tok`
-				: `$(zap) ${fmt(rate)} tok/s · ${tokens}`;
+				: `$(zap) ${unit(rate, ' tok/s')} · ${tokens}`;
 		this.item.tooltip = this.tooltip();
 	}
 
@@ -271,9 +301,11 @@ class StatusView {
 
 		const shown = this.activeSource() ?? all.find(s => s.last);
 		const last = shown?.last;
-		this.item.text = last
-			? `$(zap) ${fmt(last.decodeTokS)} tok/s · ${last.completionTokens ?? 0} tok`
-			: `$(zap) ${this.shortName(shown ?? all[0])} idle`;
+		this.item.text =
+			shown && last
+				? `$(zap) ${this.shortName(shown)} · ${unit(last.decodeTokS, ' tok/s')} · ` +
+					`${last.completionTokens ?? 0} tok`
+				: `$(zap) ${this.shortName(shown ?? all[0])} idle`;
 		this.item.tooltip = this.tooltip();
 	}
 
@@ -282,7 +314,7 @@ class StatusView {
 	}
 
 	private shortName(s: SourceState): string {
-		return s.model ?? s.endpoint.label ?? s.endpoint.adapter.displayName;
+		return shortModel(s.model ?? s.endpoint.label ?? s.endpoint.adapter.displayName);
 	}
 
 	private tooltip(): vscode.MarkdownString {
@@ -295,14 +327,14 @@ class StatusView {
 			const s = shown.last;
 			md.appendMarkdown(`**${this.shortName(shown)}** — last request\n\n`);
 			md.appendMarkdown('| | |\n|---|---|\n');
-			md.appendMarkdown(`| Decode | **${fmt(s.decodeTokS, 2)} tok/s** |\n`);
-			md.appendMarkdown(`| End-to-end | ${fmt(s.requestTokS, 2)} tok/s |\n`);
+			md.appendMarkdown(`| Decode | **${unit(s.decodeTokS, ' tok/s', 2)}** |\n`);
+			md.appendMarkdown(`| End-to-end | ${unit(s.requestTokS, ' tok/s', 2)} |\n`);
 			md.appendMarkdown(
-				`| Generated | ${s.completionTokens ?? 0} tokens in ${fmt(s.decodeElapsedS, 2)}s |\n`
+				`| Generated | ${s.completionTokens ?? 0} tokens in ${unit(s.decodeElapsedS, 's', 2)} |\n`
 			);
-			md.appendMarkdown(`| TTFT | ${fmt(s.ttftS, 3)}s |\n`);
+			md.appendMarkdown(`| TTFT | ${unit(s.ttftS, 's', 3)} |\n`);
 			md.appendMarkdown(
-				`| Prefill | ${s.promptTokens ?? 0} tokens @ ${fmt(s.prefillTokS, 0)} tok/s |\n`
+				`| Prefill | ${s.promptTokens ?? 0} tokens @ ${unit(s.prefillTokS, ' tok/s', 0)} |\n`
 			);
 			md.appendMarkdown(
 				`| Cache | ${s.cachedTokens ?? 0} cached (${s.cacheSource ?? 'none'}) |\n`
@@ -311,7 +343,7 @@ class StatusView {
 			for (const [label, value] of Object.entries(s.extra ?? {})) {
 				md.appendMarkdown(`| ${label} | ${value} |\n`);
 			}
-			md.appendMarkdown(`| Total | ${fmt(s.requestElapsedS, 2)}s |\n`);
+			md.appendMarkdown(`| Total | ${unit(s.requestElapsedS, 's', 2)} |\n`);
 		} else {
 			md.appendMarkdown('**Inference HUD** — no requests seen yet.\n');
 		}
