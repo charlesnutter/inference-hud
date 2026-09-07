@@ -1,0 +1,40 @@
+# SYNTHESIZED — not captured from a live server. SGLang has no macOS backend,
+# so these lines were written by hand from the metric definitions in
+# python/sglang/srt/observability/metrics_collector.py at sgl-project/sglang
+# dcebe8c. Names, types, and label sets are taken from the source; the values
+# are plausible, not measured. Replace with a real capture when a Linux GPU
+# box is available.
+#
+# Scenario: idle, immediately after one completed generation.
+# HELP sglang:num_running_reqs The number of running requests.
+# TYPE sglang:num_running_reqs gauge
+sglang:num_running_reqs{model_name="Qwen/Qwen2.5-0.5B-Instruct"} 0.0
+# HELP sglang:num_queue_reqs The number of requests in the waiting queue.
+# TYPE sglang:num_queue_reqs gauge
+sglang:num_queue_reqs{model_name="Qwen/Qwen2.5-0.5B-Instruct"} 0.0
+# HELP sglang:gen_throughput The generation throughput (token/s).
+# TYPE sglang:gen_throughput gauge
+sglang:gen_throughput{model_name="Qwen/Qwen2.5-0.5B-Instruct"} 0.0
+# HELP sglang:prompt_tokens_total Number of prefill tokens processed.
+# TYPE sglang:prompt_tokens_total counter
+sglang:prompt_tokens_total{model_name="Qwen/Qwen2.5-0.5B-Instruct"} 2199.0
+# HELP sglang:generation_tokens_total Number of generation tokens processed.
+# TYPE sglang:generation_tokens_total counter
+sglang:generation_tokens_total{model_name="Qwen/Qwen2.5-0.5B-Instruct"} 400.0
+# HELP sglang:cached_tokens_total Number of cached prompt tokens by source (device/host/storage).
+# TYPE sglang:cached_tokens_total counter
+sglang:cached_tokens_total{model_name="Qwen/Qwen2.5-0.5B-Instruct",cache_source="device"} 2198.0
+# HELP sglang:cache_hit_rate The prefix cache hit rate.
+# TYPE sglang:cache_hit_rate gauge
+sglang:cache_hit_rate{model_name="Qwen/Qwen2.5-0.5B-Instruct"} 0.999
+# HELP sglang:token_usage The token usage.
+# TYPE sglang:token_usage gauge
+sglang:token_usage{model_name="Qwen/Qwen2.5-0.5B-Instruct"} 0.06
+# HELP sglang:time_to_first_token_seconds Histogram of time to first token in seconds.
+# TYPE sglang:time_to_first_token_seconds histogram
+sglang:time_to_first_token_seconds_count{model_name="Qwen/Qwen2.5-0.5B-Instruct",is_streaming="true"} 3.0
+sglang:time_to_first_token_seconds_sum{model_name="Qwen/Qwen2.5-0.5B-Instruct",is_streaming="true"} 0.8412
+# HELP sglang:e2e_request_latency_seconds Histogram of End-to-end request latency in seconds
+# TYPE sglang:e2e_request_latency_seconds histogram
+sglang:e2e_request_latency_seconds_count{model_name="Qwen/Qwen2.5-0.5B-Instruct"} 2.0
+sglang:e2e_request_latency_seconds_sum{model_name="Qwen/Qwen2.5-0.5B-Instruct"} 2.4408
