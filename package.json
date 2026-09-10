@@ -91,6 +91,12 @@
                   "label": {
                     "type": "string",
                     "description": "Name shown in the tooltip."
+                  },
+                  "proxy": {
+                    "type": "number",
+                    "minimum": 1024,
+                    "maximum": 65535,
+                    "description": "Listen on this local port and forward to `url`, measuring traffic as it passes. Point your client's base URL at http://127.0.0.1:<port>/v1 instead of the engine. Needed only for engines that publish no server-wide telemetry, such as Ollama and LM Studio; everything else is measured without sitting in the request path."
                   }
                 }
               }

@@ -44,8 +44,9 @@ per-request totals are unavailable and it will say so. Start SGLang with
 | **vLLM** | `/metrics` (Prometheus) | yes | ✅ |
 | **SGLang** | `/metrics` (Prometheus) | **no** — needs `--enable-metrics` | ⚠️ untested against a live server |
 | **oMLX** | `/admin/api/stats` (needs admin auth) | yes, gated | planned |
-| **Ollama** | none — no `/metrics` endpoint | — | via proxy |
-| **LM Studio** | none — per-response `stats` only | — | via proxy |
+| **Ollama** | none — no `/metrics` endpoint (verified) | — | ✅ via proxy |
+| **LM Studio** | none — per-response `stats` only | — | ✅ via proxy |
+| **LocalAI** | `/metrics` exists but is HTTP-level only, no token counters | — | ✅ via proxy |
 
 Engines split into two classes, and the split drives the design:
 
@@ -68,8 +69,21 @@ Engines split into two classes, and the split drives the design:
 
 The proxy path works for *any* OpenAI-compatible server, even one that reports
 no timings whatsoever: holding the socket makes time-to-first-byte the TTFT and
-last-byte the decode duration, and `usage.completion_tokens` is guaranteed by
-the spec.
+last-byte the decode duration. Enable it by giving an endpoint a port to listen
+on, then pointing your client at that port instead of the engine:
+
+```jsonc
+"inferenceHud.endpoints": [
+  { "url": "http://127.0.0.1:11434", "proxy": 8788 }
+]
+```
+
+It forwards bytes untouched and never modifies a request, so it cannot change
+what your client receives. Token counts come from `usage` when the upstream
+sends it and from counting stream chunks when it does not — the tooltip says
+which. Streaming is where a proxy beats polling outright: the tokens are
+physically passing through, so the rate is live and per-request rather than
+sampled.
 
 `src/engines.ts` contains the detection registry — it fingerprints the engines
 above across their default ports in under 50ms. Engines listed as `via proxy`

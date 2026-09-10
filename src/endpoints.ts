@@ -2,6 +2,7 @@ import { TelemetryAdapter } from './adapter';
 import { mtplxAdapter } from './adapters/mtplx';
 import { llamaCppAdapter } from './adapters/llamacpp';
 import { vllmAdapter, sglangAdapter } from './adapters/prometheus';
+import { proxyAdapter } from './adapters/proxy';
 import { detect, probeOne } from './engines';
 
 /** Engines with a working telemetry adapter, keyed by their `engines.ts` id. */
@@ -12,8 +13,17 @@ export const ADAPTERS: Record<string, TelemetryAdapter> = {
 	sglang: sglangAdapter
 };
 
-/** One entry of the `inferenceHud.endpoints` setting. */
-export type EndpointConfig = string | { url: string; engine?: string; label?: string };
+/**
+ * One entry of the `inferenceHud.endpoints` setting.
+ *
+ * `proxy` names a local port to listen on and turns the entry into a forwarder:
+ * traffic sent through that port is measured on its way to `url`. It is the
+ * only way to see engines that publish no server-wide telemetry, and it is
+ * opt-in precisely because it sits in the request path.
+ */
+export type EndpointConfig =
+	| string
+	| { url: string; engine?: string; label?: string; proxy?: number };
 
 export interface ResolvedEndpoint {
 	url: string;
@@ -62,6 +72,19 @@ export async function resolveEndpoints(
 
 		const pinned = typeof entry === 'string' ? undefined : entry.engine;
 		const label = typeof entry === 'string' ? undefined : entry.label;
+		const proxyPort = typeof entry === 'string' ? undefined : entry.proxy;
+
+		// A proxy entry wins over detection: the user is asking to carry the
+		// traffic, which works whether or not the engine is recognised.
+		if (proxyPort) {
+			endpoints.push({
+				url,
+				adapter: proxyAdapter(proxyPort),
+				label: label ?? `${url} (via :${proxyPort})`,
+				detected: false
+			});
+			continue;
+		}
 
 		if (pinned) {
 			const adapter = ADAPTERS[pinned];
@@ -126,7 +149,14 @@ function describe(engineId: string): string {
 		case 'ollama':
 		case 'lmstudio':
 		case 'openai-generic':
-			return 'publishes no server-wide telemetry; needs the proxy mode, which is not built yet';
+			// The proxy exists now, so say how to turn it on rather than
+			// reporting the engine as a dead end.
+			return (
+				'publishes no server-wide telemetry, so it can only be measured by ' +
+				'carrying its traffic. Add a proxy port to this endpoint, e.g. ' +
+				'{"url": "<this url>", "proxy": 8788}, then point your client at ' +
+				'http://127.0.0.1:8788/v1'
+			);
 		case 'omlx':
 			return 'telemetry is behind admin authentication, which is not supported yet';
 		default:
