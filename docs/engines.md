@@ -102,7 +102,7 @@ exclusively to the caller. Rich response telemetry is not server-wide telemetry.
 | **KoboldCpp** | `/api/extra/perf` — documented to carry `last_process_time`, `last_eval_time`, `last_input_count`, `last_token_count`, plus idle/busy. That is a complete per-request set, so it is probably **pollable, not proxy-only** | macOS arm64 build from its releases page |
 | **LM Studio** | Per-response `stats` (`tokens_per_second`, `time_to_first_token`) only, so **expected proxy-only**. `/api/v0/models` gives loaded state | download the app, enable the local server |
 | **llamafile** | llama.cpp-derived, so may inherit `/slots` and `/metrics` | single-file download |
-| **LocalAI** | Unclear. A Prometheus request has existed since 2023; current state unconfirmed | brew or binary |
+| **LocalAI** | Unclear. A Prometheus request has existed since 2023; current state unconfirmed | **Homebrew build segfaults on Apple Silicon** — use Docker, see below |
 | **mistral.rs** | Has `/metrics`, but documented as **HTTP-level** — request counts and latency by route and status, with no token counters. If so it is useless for a tok/s readout despite having Prometheus | cargo, Metal supported |
 | **Tabby**, **Xinference**, **Jan/Cortex**, **GPT4All** | Unconfirmed | various |
 
@@ -167,9 +167,22 @@ Supported today.
 Developer tab; default port **1234**. Expected proxy-only: its `stats` object
 (`tokens_per_second`, `time_to_first_token`) is per-response. Probe to confirm.
 
-**LocalAI** — `brew install localai`, `local-ai run`, default port **8080**
-(collides with llama.cpp — move one). Prometheus support is unconfirmed; this is
-the highest-value probe on the list, since a positive result would be a
+**LocalAI** — **the Homebrew build is broken on this machine.** Verified
+2026-09-10: `local-ai` 4.9.0 segfaults on every invocation, including
+`--version`, crashing in `github.com/shoenig/go-m1cpu` at `cpu.go:148` during
+package init. That dependency reads Apple Silicon CPU details through IOKit and
+v0.1.6 does not survive an M5 Pro on macOS 26. The crash happens before any
+argument parsing, so no flag avoids it.
+
+Use the container instead — CPU-only on a Mac, which is fine for reading
+`/metrics`:
+
+```bash
+docker run -p 8080:8080 localai/localai:latest-cpu   # needs Docker Desktop running
+```
+
+Default port **8080**, so stop llama-server first. Prometheus support is
+unconfirmed and worth establishing, since a positive result would make LocalAI a
 `PromSpec` entry.
 
 **Jan** — `brew install --cask jan`. Its Cortex server is started from the app;
