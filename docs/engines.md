@@ -130,6 +130,87 @@ CUDA or ROCm only, so no local verification is possible on this machine:
 **WebLLM.** It runs inside the browser's WebGPU context. There is no localhost
 server, so there is nothing for a VS Code extension to connect to at any price.
 
+## Steps, per engine
+
+Same shape each time: install, start it with whatever flag makes it talk, probe
+it, then wire it to Copilot with the recipe above if you want agent traffic.
+
+Homebrew availability below was checked on 2026-09-10. Run commands and default
+ports come from each project's documentation unless marked verified — check them
+against the current README before assuming, since that is exactly where this
+project has been bitten twice.
+
+### Verified on this machine
+
+**Ollama** — `brew install ollama`, `ollama serve`, port **11434**.
+Probed 2026-09-10: no metrics endpoint of any kind. Proxy-only, nothing to do
+until the proxy exists.
+
+**llama.cpp** — `brew install llama.cpp`, then
+`llama-server -m model.gguf --port 8080 -c 8192 --metrics`.
+`--metrics` is off by default and without it there are no per-request totals.
+Supported today.
+
+**vLLM** — no Apple Silicon wheels; source build, already done at `~/dev/vllm`:
+```bash
+source ~/dev/vllm/.venv/bin/activate
+vllm serve <hf-model> --port 8000 --dtype float16 --enforce-eager \
+  --gpu-memory-utilization 0.2
+```
+`--gpu-memory-utilization` controls **CPU RAM** here despite its name, and
+defaults to 0.92, which fails at startup when anything else holds memory.
+Supported today.
+
+### In Homebrew, not yet probed
+
+**LM Studio** — `brew install --cask lm-studio`. Start the server from its
+Developer tab; default port **1234**. Expected proxy-only: its `stats` object
+(`tokens_per_second`, `time_to_first_token`) is per-response. Probe to confirm.
+
+**LocalAI** — `brew install localai`, `local-ai run`, default port **8080**
+(collides with llama.cpp — move one). Prometheus support is unconfirmed; this is
+the highest-value probe on the list, since a positive result would be a
+`PromSpec` entry.
+
+**Jan** — `brew install --cask jan`. Its Cortex server is started from the app;
+default port **1337**.
+
+**GPT4All** — `brew install --cask gpt4all`. Local API server is off by default,
+enabled in settings; default port **4891**.
+
+### Not in Homebrew
+
+**KoboldCpp** — download the macOS arm64 binary from its GitHub releases, then
+`./koboldcpp --model model.gguf --port 5001`. **Probe this one first of all**:
+`/api/extra/perf` is documented to carry `last_process_time`, `last_eval_time`,
+`last_input_count` and `last_token_count`, which would make it pollable rather
+than proxy-only and would be a genuine addition.
+
+**llamafile** — download a `.llamafile`, `chmod +x`, run it with
+`--server --port 8080`. llama.cpp-derived, so probe for `/slots` and `/metrics`
+specifically; if it inherits them the existing adapter may work unmodified.
+
+**mistral.rs** — `cargo install mistralrs-server --features metal`, default port
+**1234**. It does serve `/metrics`, but documented as HTTP-level only — request
+counts and latency by route and status, no token counters. Probe before
+investing: Prometheus without token counters is useless here.
+
+**Xinference** — `uv pip install "xinference[all]"`, `xinference-local`, default
+port **9997**.
+
+**`mlx_lm.server`** — `uv pip install mlx-lm`, then
+`mlx_lm.server --model <hf-id> --port 8080`. Apple's own reference server, and
+the one MLX-adjacent thing not yet covered by MTPLX or oMLX.
+
+**TabbyML** — **not** `brew install --cask tabby`; that is an unrelated terminal
+emulator. TabbyML needs its own tap (`brew tap TabbyML/tabby`) or a release
+binary. Run with `--device metal`; default port **8080**.
+
+**oMLX** — already installed. Start its server from the app, then probe. Its
+`/admin/api/stats` is server-wide but behind admin auth, so supporting it needs
+a `SecretStorage` input path first — the credential work and the config UI are
+the same piece of work.
+
 ## Practical ordering
 
 Adding a Prometheus engine looks like a fifteen-line spec entry and is not: each
