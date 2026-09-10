@@ -102,6 +102,12 @@ publishes `sglang:gen_throughput` as a gauge, which the adapter prefers over
 differencing, and splits `cached_tokens_total` by a `cache_source` label. Run it
 against a real server before trusting it.
 
+`/metrics` is **not** served unless `--enable-metrics` is passed
+(`enable_metrics` defaults to False in `arg_groups/fields/observability.py`, and
+`http_server.py` mounts the route only when it is set). Detection therefore
+fingerprints `/model_info`, which is always present, so a running server without
+the flag is found and reported rather than looking absent.
+
 ## Prior art (surveyed 2026-08-28)
 
 Nothing found that occupies this niche. Closest neighbours:

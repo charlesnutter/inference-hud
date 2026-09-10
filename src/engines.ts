@@ -127,9 +127,17 @@ export const ENGINES: readonly EngineAdapter[] = [
 		defaultPorts: [30000],
 		mode: 'poll',
 		telemetryPath: '/metrics',
+		// Fingerprinted on /model_info rather than /metrics, because SGLang
+		// serves metrics only under --enable-metrics, which is off by default.
+		// Probing /metrics would make a running server look absent; this way it
+		// is found and the adapter can say what flag is missing.
 		async probe(base, signal) {
-			const t = await getText(`${base}/metrics`, signal);
-			return t?.includes('sglang:') ? modelFromMetrics(t) ?? 'SGLang' : null;
+			const info = await getJson(`${base}/model_info`, signal);
+			if (!info || !('served_model_name' in info || 'model_path' in info)) {
+				return null;
+			}
+			const name = info.served_model_name ?? info.model_path ?? '';
+			return String(name).split('/').pop() || 'SGLang';
 		}
 	},
 	{

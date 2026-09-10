@@ -32,15 +32,17 @@ Early. MTPLX, llama.cpp and vLLM work end to end. SGLang shares vLLM's adapter
 and is written against its published metric definitions, but has not been run
 against a live server yet.
 
-Start `llama-server` with `--metrics` — without it the HUD still shows live
-progress from `/slots`, but per-request totals are unavailable and it will say so.
+Two engines need a flag before they report anything. Start `llama-server` with
+`--metrics` — without it the HUD still shows live progress from `/slots`, but
+per-request totals are unavailable and it will say so. Start SGLang with
+`--enable-metrics`, without which it serves no `/metrics` at all.
 
 | Engine | Passive telemetry | Enabled by default | Supported |
 |---|---|---|---|
 | **MTPLX** | `/v1/mtplx/metrics/stream` (SSE, per-request) | yes | ✅ |
 | **llama.cpp** | `/slots` for live progress + `/metrics` for totals | `/slots` yes, `/metrics` **no** | ✅ |
 | **vLLM** | `/metrics` (Prometheus) | yes | ✅ |
-| **SGLang** | `/metrics` (Prometheus) | yes | ⚠️ untested against a live server |
+| **SGLang** | `/metrics` (Prometheus) | **no** — needs `--enable-metrics` | ⚠️ untested against a live server |
 | **oMLX** | `/admin/api/stats` (needs admin auth) | yes, gated | planned |
 | **Ollama** | none — no `/metrics` endpoint | — | via proxy |
 | **LM Studio** | none — per-response `stats` only | — | via proxy |
