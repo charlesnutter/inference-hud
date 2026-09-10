@@ -33,6 +33,29 @@ Notes only — nothing here is implemented or scheduled.
   Credentials (oMLX needs an admin key) must go in `SecretStorage`, never in
   settings.json, so any such UI needs a secure input path anyway.
 
+## Proxy: the listen port has no default
+
+`{"url": ..., "proxy": 8788}` requires inventing a port, and 8788 is invented —
+it is not a standard, nothing derives it, and it appears nowhere in the
+extension's logic, only in example text in the README and in the guidance string
+in `endpoints.ts`. Its one merit is negative: it avoids ports people commonly
+use. Contrast `url`, where 11434 is Ollama's real default and has to be right.
+
+Because the setting has no default, the documentation had to pick a number, and
+a number printed in a README starts looking authoritative. Two ways out:
+
+1. **A real default in `package.json`**, so `"proxy": true` works and the number
+   lives in one place. Simple, and the URL a client is pointed at stays stable
+   across restarts, which matters because it has to be written into
+   `chatLanguageModels.json` by hand.
+2. **Bind port 0 and let the OS assign one**, reporting the actual port in the
+   notice and tooltip. Never collides — worth something, since a fixed default
+   collides the moment two engines are proxied at once. But the port then
+   changes every restart, and any client configured against it breaks. That
+   probably disqualifies it.
+
+Option 1 unless proxying several engines at once becomes common.
+
 ## Engine support
 
 See the support matrix in README.md. Detection is wired up and the poll adapter
