@@ -35,10 +35,71 @@ Notes only — nothing here is implemented or scheduled.
 
 ## Engine support
 
-See the support matrix in README.md. The detection registry in
-`src/engines.ts` is written but not wired to the status bar. Poll adapter
-(llama.cpp `/slots`, vLLM `/metrics`) is the next highest-value piece —
-it brings two engines in with no user configuration.
+See the support matrix in README.md. Detection is wired up and the poll adapter
+is built: MTPLX, llama.cpp and vLLM are verified end to end, SGLang shares
+vLLM's adapter but has only ever run against fixtures.
+
+### The axis that decides whether an engine can be supported
+
+Not OpenAI compatibility. The OpenAI `usage` block is returned **to whoever made
+the request**, and the extension is not the one making it — Copilot is. A server
+can be perfectly OpenAI-compatible and still be completely invisible here.
+
+The question is whether the server publishes telemetry **server-wide**. Three
+shapes qualify: an SSE push (MTPLX), Prometheus counters (vLLM, SGLang, TGI), or
+a pollable state endpoint (llama.cpp `/slots`). Everything else is proxy-only.
+
+Engine round-ups get this wrong almost every time. A list surveyed 2026-09-09
+praised Ollama for returning "incredibly rich metrics ... `prompt_eval_duration`,
+`eval_duration`" — all true, and all delivered to the caller and nobody else,
+which is exactly why Ollama is `mode: 'proxy'` here.
+
+### Candidates, by cost
+
+**Cheap — a `PromSpec` entry in `adapters/prometheus.ts`, if they check out.
+None of these three has been verified; no source read, no live server.**
+
+- **Aphrodite** — a vLLM fork, so it should expose the same counters under its
+  own metric prefix. Highest-confidence guess of the three.
+- **TGI** — Hugging Face's engine, Prometheus on the inference port.
+- **Triton Inference Server** — the real observability layer behind
+  TensorRT-LLM, which has none of its own. Prometheus, but on a *separate* port
+  (8002 by default), so it needs a change to the port map, not just a spec.
+
+**Worth investigating before assuming proxy-only:**
+
+- **KoboldCpp** — believed to expose `/api/extra/perf` carrying last-request
+  timings, which would make it pollable rather than proxy-only. Unverified.
+- **LocalAI**, **Xinference**, **Tabby**, **mistral.rs** — all OpenAI-compatible,
+  none confirmed to publish anything server-wide. Read the source before
+  promising support.
+
+**Proxy-only, so blocked on the proxy:** Ollama, LM Studio, ExLlamaV2 (via
+TabbyAPI), and every unrecognised OpenAI-compatible server.
+
+**Not supportable at all:** WebLLM. It runs in the browser's WebGPU context with
+no localhost server to watch — there is nothing for the extension to connect to.
+
+**Overlooked by the round-up and worth a look:** oMLX (already in the registry),
+`mlx_lm.server` (Apple's own reference server, distinct from MTPLX and oMLX),
+llamafile (llama.cpp-derived, so it may inherit `/slots` and `/metrics`), Jan /
+Cortex, GPT4All, text-generation-webui, Ramalama, Lemonade, Foundry Local,
+Modular MAX.
+
+### Which to do next
+
+Adding Aphrodite and TGI is cheap, but each still needs a live server to verify
+against, and documentation has now diverged from reality twice — llama.cpp's
+`/slots` carries none of the fields its README describes, and SGLang's metrics
+need a flag the docs do not lead with. Assume every new engine costs a
+verification session, not a spec entry.
+
+Against that, **one proxy covers Ollama and LM Studio** — the two most widely
+used engines that are currently invisible — plus every OpenAI-compatible server
+nobody has heard of. That is still the higher-leverage piece, and the reason it
+was deferred (it sits in the request path and can break the editor, where a
+passive adapter cannot) is a reason to build it carefully, not to keep
+postponing it.
 
 ## llama.cpp: verified behaviour (tested 2026-08-29, build b9860)
 
