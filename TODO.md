@@ -54,6 +54,11 @@ praised Ollama for returning "incredibly rich metrics ... `prompt_eval_duration`
 `eval_duration`" — all true, and all delivered to the caller and nobody else,
 which is exactly why Ollama is `mode: 'proxy'` here.
 
+The per-engine playbook — supportable, testable on this machine, and the setup
+steps for each — lives in `docs/engines.md`. `scripts/probe.sh` answers the
+"can it be supported" question empirically for any server, and should be run
+before writing any adapter.
+
 ### Candidates, by cost
 
 **Cheap — a `PromSpec` entry in `adapters/prometheus.ts`, if they check out.
