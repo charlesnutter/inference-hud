@@ -102,7 +102,7 @@ exclusively to the caller. Rich response telemetry is not server-wide telemetry.
 | **KoboldCpp** | `/api/extra/perf` — documented to carry `last_process_time`, `last_eval_time`, `last_input_count`, `last_token_count`, plus idle/busy. That is a complete per-request set, so it is probably **pollable, not proxy-only** | macOS arm64 build from its releases page |
 | **LM Studio** | Per-response `stats` (`tokens_per_second`, `time_to_first_token`) only, so **expected proxy-only**. `/api/v0/models` gives loaded state | download the app, enable the local server |
 | **llamafile** | llama.cpp-derived, so may inherit `/slots` and `/metrics` | single-file download |
-| **LocalAI** | Unclear. A Prometheus request has existed since 2023; current state unconfirmed | **Homebrew build segfaults on Apple Silicon** — use Docker, see below |
+| **LocalAI** | **Proxy-only, settled 2026-09-10.** `/metrics` exists but returns 500, and the metrics it collects are HTTP-level (`api_call`), not token-level | see below |
 | **mistral.rs** | Has `/metrics`, but documented as **HTTP-level** — request counts and latency by route and status, with no token counters. If so it is useless for a tok/s readout despite having Prometheus | cargo, Metal supported |
 | **Tabby**, **Xinference**, **Jan/Cortex**, **GPT4All** | Unconfirmed | various |
 
@@ -167,23 +167,36 @@ Supported today.
 Developer tab; default port **1234**. Expected proxy-only: its `stats` object
 (`tokens_per_second`, `time_to_first_token`) is per-response. Probe to confirm.
 
-**LocalAI** — **the Homebrew build is broken on this machine.** Verified
-2026-09-10: `local-ai` 4.9.0 segfaults on every invocation, including
-`--version`, crashing in `github.com/shoenig/go-m1cpu` at `cpu.go:148` during
-package init. That dependency reads Apple Silicon CPU details through IOKit and
-v0.1.6 does not survive an M5 Pro on macOS 26. The crash happens before any
-argument parsing, so no flag avoids it.
+**LocalAI** — **settled 2026-09-10: proxy-only. Do not spend more time here.**
 
-Use the container instead — CPU-only on a Mac, which is fine for reading
-`/metrics`:
+Two separate walls, either of which is enough.
+
+*The Homebrew build does not run at all.* `local-ai` 4.9.0 segfaults on every
+invocation including `--version`, crashing in `github.com/shoenig/go-m1cpu` at
+`cpu.go:148` during package init — a cgo call reading Apple Silicon CPU details
+through IOKit, which v0.1.6 does not survive on an M5 Pro under macOS 26. It
+fails before argument parsing, so no flag avoids it. Reinstalling gets the same
+bottle and the same crash. LocalAI's master has since bumped the dependency to
+v0.2.2, but v4.9.0 is still the latest release, so the fix is unreleased.
+
+*The metrics are the wrong kind, and broken besides.* Reached via the container,
+which sidesteps the segfault entirely:
 
 ```bash
-docker run -p 8080:8080 localai/localai:latest-cpu   # needs Docker Desktop running
+docker run -d -p 8080:8080 localai/localai:latest-cpu
 ```
 
-Default port **8080**, so stop llama-server first. Prometheus support is
-unconfirmed and worth establishing, since a positive result would make LocalAI a
-`PromSpec` entry.
+`/metrics` returns **500**, not 404 — the route is wired but the Prometheus
+gatherer errors with `collected metric "api_call" ... was collected before with
+the same name and label values`. That is a known, long-standing bug
+([#1445](https://github.com/mudler/LocalAI/issues/1445)), as is the label
+corruption visible alongside it — truncated paths like `path="/metri"`, and
+`GETT` for `GET` ([#2207](https://github.com/mudler/LocalAI/issues/2207)).
+
+The decisive part is what the metric *is*. `api_call` is an HTTP request
+histogram labelled by method and path. There are no token counters, so even a
+fixed endpoint would carry nothing this extension can use — the same shape as
+mistral.rs. Prometheus presence is not the test; token counters are.
 
 **Jan** — `brew install --cask jan`. Its Cortex server is started from the app;
 default port **1337**.
