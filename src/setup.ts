@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { EndpointConfig, resolveEndpoints } from './endpoints';
+import { resolveEndpoints, configuredEndpoints } from './endpoints';
 
 /**
  * Walks a user from "I have a local model running" to "it is selectable in the
@@ -19,7 +19,7 @@ export async function setUpModel(log: vscode.LogOutputChannel): Promise<void> {
 		{ location: vscode.ProgressLocation.Notification, title: 'Looking for local models…' },
 		() =>
 			resolveEndpoints(
-				cfg.get<EndpointConfig[]>('endpoints', []),
+				configuredEndpoints(cfg),
 				cfg.get<boolean>('autoDetect', true),
 				cfg.get<boolean>('autoProxy', false),
 				cfg.get<number>('autoProxyPort', 8788)
@@ -73,14 +73,24 @@ export async function setUpModel(log: vscode.LogOutputChannel): Promise<void> {
 		return;
 	}
 
-	const model =
+	// Every model at once, defaulted to all. The chat entry takes a list, so
+	// adding them together means switching between them later is the model
+	// dropdown rather than another trip through configuration — and the only
+	// reason to run this again is pulling a genuinely new model.
+	const picked =
 		models.length === 1
-			? models[0]
-			: await vscode.window.showQuickPick(models, {
-					title: 'Which model?',
-					placeHolder: 'Select a model to add to the chat picker'
-				});
-	if (!model) {
+			? models
+			: (
+					await vscode.window.showQuickPick(
+						models.map(m => ({ label: m, picked: true })),
+						{
+							title: 'Which models?',
+							placeHolder: 'All of them, unless you want fewer',
+							canPickMany: true
+						}
+					)
+				)?.map(p => p.label);
+	if (!picked || picked.length === 0) {
 		return;
 	}
 
@@ -88,25 +98,26 @@ export async function setUpModel(log: vscode.LogOutputChannel): Promise<void> {
 		name: `Local ${shortHost(chosen.url)}`,
 		vendor: 'customendpoint',
 		apiType: 'chat-completions',
-		models: [
-			{
-				id: model,
-				name: `${model} (Inference HUD)`,
-				url: clientBase,
-				toolCalling: true,
-				maxInputTokens: 28000,
-				maxOutputTokens: 4096
-			}
-		]
+		models: picked.map(id => ({
+			id,
+			name: `${id} (Inference HUD)`,
+			url: clientBase,
+			toolCalling: true,
+			maxInputTokens: 28000,
+			maxOutputTokens: 4096
+		}))
 	};
 	const block = JSON.stringify(entry, null, 2);
 
 	await vscode.env.clipboard.writeText(block);
-	log.info(`setup: prepared chat model entry for ${model} at ${clientBase}`);
+	log.info(`setup: prepared ${picked.length} chat model(s) at ${clientBase}`);
 
+	const summary =
+		picked.length === 1 ? picked[0] : `${picked.length} models`;
 	const action = await vscode.window.showInformationMessage(
-		`Copied a chat model entry for ${model}, pointing at ${clientBase}. ` +
-			'Paste it into the array in chatLanguageModels.json.',
+		`Copied ${summary}, pointing at ${clientBase}. Paste into the array in ` +
+			'chatLanguageModels.json — replacing any earlier Inference HUD entry for ' +
+			'this server rather than adding a second one.',
 		'Open chatLanguageModels.json',
 		'Done'
 	);

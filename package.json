@@ -62,50 +62,11 @@
         "inferenceHud.endpoints": {
           "type": "array",
           "default": [],
-          "markdownDescription": "Inference servers to watch. Use a plain URL string to have the engine detected, or an object to pin it:\n\n```json\n[\n  \"http://127.0.0.1:8000\",\n  { \"url\": \"http://127.0.0.1:9090\", \"engine\": \"llamacpp\" },\n  { \"url\": \"http://box.local:8080\", \"label\": \"workstation\" }\n]\n```\n\nEntries listed here are always watched, even while unreachable.",
           "items": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uri",
-                "description": "Base URL; the engine is detected automatically."
-              },
-              {
-                "type": "object",
-                "required": [
-                  "url"
-                ],
-                "additionalProperties": false,
-                "properties": {
-                  "url": {
-                    "type": "string",
-                    "format": "uri",
-                    "description": "Base URL of the server."
-                  },
-                  "engine": {
-                    "type": "string",
-                    "enum": [
-                      "mtplx",
-                      "llamacpp",
-                      "vllm",
-                      "sglang"
-                    ],
-                    "description": "Pin the engine instead of detecting it."
-                  },
-                  "label": {
-                    "type": "string",
-                    "description": "Name shown in the tooltip."
-                  },
-                  "proxy": {
-                    "type": "number",
-                    "minimum": 1024,
-                    "maximum": 65535,
-                    "description": "Listen on this local port and forward to `url`, measuring traffic as it passes. Point your client's base URL at http://127.0.0.1:<port>/v1 instead of the engine. Needed only for engines that publish no server-wide telemetry, such as Ollama and LM Studio; everything else is measured without sitting in the request path."
-                  }
-                }
-              }
-            ]
-          }
+            "type": "string",
+            "format": "uri"
+          },
+          "markdownDescription": "Inference servers to watch, as base URLs. The engine at each is detected automatically.\n\nUsually you need none of these: supported engines on well-known localhost ports are found on their own. Add one for a non-default port or a server on another machine.\n\nTo pin an engine or run a proxy on a chosen port, use `#inferenceHud.endpointOverrides#`.\n\n[\u25b6 Set up a local model](command:inferenceHud.setupModel)"
         },
         "inferenceHud.autoDetect": {
           "type": "boolean",
@@ -115,7 +76,7 @@
         "inferenceHud.autoProxy": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Automatically proxy detected engines that publish no server-wide telemetry, such as Ollama and LM Studio. Without this they cannot be measured at all; with it, the extension listens on a local port and forwards to the engine, reading the stream as it passes. You still point your client's base URL at the proxy \u2014 run `Inference HUD: Set Up Local Model` to do that without editing JSON.\n\nOff by default because it opens a listening socket on `127.0.0.1`."
+          "markdownDescription": "Automatically proxy detected engines that publish no server-wide telemetry, such as Ollama and LM Studio. Without this they cannot be measured at all; with it, the extension listens on a local port and forwards to the engine, reading the stream as it passes. You still point your client's base URL at the proxy \u2014 run `Inference HUD: Set Up Local Model` to do that without editing JSON.\n\nOff by default because it opens a listening socket on `127.0.0.1`.\n\n[\u25b6 Set up a local model](command:inferenceHud.setupModel)"
         },
         "inferenceHud.autoProxyPort": {
           "type": "number",
@@ -124,13 +85,98 @@
           "maximum": 65535,
           "markdownDescription": "First port an automatically started proxy may claim. Further engines take the next free port up. Ports named explicitly in `#inferenceHud.endpoints#` are never reused."
         },
+        "inferenceHud.endpointOverrides": {
+          "type": "array",
+          "default": [],
+          "markdownDescription": "Endpoints needing more than a URL. Rarely required.\n\n```json\n[\n  { \"url\": \"http://127.0.0.1:9090\", \"engine\": \"llamacpp\" },\n  { \"url\": \"http://127.0.0.1:11434\", \"proxy\": 8788 }\n]\n```\n\n`engine` pins detection; `proxy` listens on that port and forwards to `url`, which is how engines publishing no telemetry are measured. `#inferenceHud.autoProxy#` does the latter for you.",
+          "items": {
+            "type": "object",
+            "required": [
+              "url"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "description": "Base URL of the server."
+              },
+              "engine": {
+                "type": "string",
+                "enum": [
+                  "mtplx",
+                  "llamacpp",
+                  "vllm",
+                  "sglang"
+                ],
+                "description": "Pin the engine instead of detecting it."
+              },
+              "label": {
+                "type": "string",
+                "description": "Name shown in the tooltip."
+              },
+              "proxy": {
+                "type": "number",
+                "minimum": 1024,
+                "maximum": 65535,
+                "description": "Listen on this port and forward to url, measuring traffic as it passes."
+              }
+            }
+          }
+        },
         "inferenceHud.statusBarPriority": {
           "type": "number",
           "default": 100,
           "description": "Status bar item priority (higher is further left)."
         }
       }
-    }
+    },
+    "walkthroughs": [
+      {
+        "id": "inferenceHud.setup",
+        "title": "Measure your local models",
+        "description": "Put tokens/sec, token counts and time-to-first-token in the status bar, for whichever local engine you use.",
+        "when": "true",
+        "steps": [
+          {
+            "id": "startEngine",
+            "title": "Start a local inference server",
+            "description": "Inference HUD watches the server, not the editor, so any client's traffic moves it \u2014 including GitHub Copilot's agent mode.\n\nStart whichever engine you use. Ollama, llama.cpp, vLLM, MTPLX and LM Studio on their usual localhost ports are all found without configuration.\n[Check what was found](command:inferenceHud.showLog)",
+            "media": {
+              "markdown": "media/walkthrough-detect.md",
+              "altText": "Detected engines listed in the log"
+            },
+            "completionEvents": [
+              "onCommand:inferenceHud.showLog"
+            ]
+          },
+          {
+            "id": "enableProxy",
+            "title": "Turn on measurement for engines that publish nothing",
+            "description": "Ollama, LM Studio and LocalAI report their timings only to whoever made the request, so they cannot be watched from outside. Measuring them means routing their traffic through the extension.\n\nSkip this if you only use llama.cpp, vLLM, SGLang or MTPLX \u2014 those publish telemetry directly and need nothing.\n[Enable proxying](command:workbench.action.openSettings?%22inferenceHud.autoProxy%22)",
+            "media": {
+              "markdown": "media/walkthrough-proxy.md",
+              "altText": "The autoProxy setting"
+            },
+            "completionEvents": [
+              "onSettingChanged:inferenceHud.autoProxy"
+            ]
+          },
+          {
+            "id": "addModel",
+            "title": "Add your models to the chat picker",
+            "description": "Optional, and only for driving your local model from Copilot Chat. The status bar works regardless of which client sends the traffic.\n\nThis reads the models your server actually has and builds the entry for you, pointed at the right URL.\n[Set up a local model](command:inferenceHud.setupModel)",
+            "media": {
+              "markdown": "media/walkthrough-model.md",
+              "altText": "Choosing models to add"
+            },
+            "completionEvents": [
+              "onCommand:inferenceHud.setupModel"
+            ]
+          }
+        ]
+      }
+    ]
   },
   "scripts": {
     "compile": "tsc -p .",

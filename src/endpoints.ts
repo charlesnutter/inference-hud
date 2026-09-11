@@ -14,7 +14,13 @@ export const ADAPTERS: Record<string, TelemetryAdapter> = {
 };
 
 /**
- * One entry of the `inferenceHud.endpoints` setting.
+ * One entry of `inferenceHud.endpoints` (a bare URL) or of
+ * `inferenceHud.endpointOverrides` (the object form).
+ *
+ * They are separate settings because the settings editor can only render a list
+ * widget for arrays of strings; an array of objects degrades to an "Edit in
+ * settings.json" link. Keeping the common case a plain URL list means it gets a
+ * real UI, and the object form stays where it belongs, out of the way.
  *
  * `proxy` names a local port to listen on and turns the entry into a forwarder:
  * traffic sent through that port is measured on its way to `url`. It is the
@@ -53,6 +59,24 @@ export interface Resolution {
 }
 
 const normalize = (url: string) => url.trim().replace(/\/+$/, '');
+
+/**
+ * The two settings that name endpoints, read as one list.
+ *
+ * `endpoints` holds plain URLs so the settings editor can give it a real list
+ * widget; `endpointOverrides` holds the object form for pinning an engine or a
+ * proxy port. Objects left in `endpoints` are still honoured rather than
+ * dropped, since nothing is gained by breaking a configuration that was valid
+ * before the split.
+ */
+export function configuredEndpoints(cfg: {
+	get<T>(section: string, fallback: T): T;
+}): EndpointConfig[] {
+	return [
+		...cfg.get<EndpointConfig[]>('endpoints', []),
+		...cfg.get<EndpointConfig[]>('endpointOverrides', [])
+	];
+}
 
 /**
  * Turn configuration into a concrete list to watch.

@@ -121,24 +121,27 @@ whatever is running and is the quicker loop:
 
 ## Settings
 
-By default nothing needs configuring — supported engines on well-known
-localhost ports are detected and watched automatically.
+By default nothing needs configuring. Supported engines on well-known localhost
+ports are detected and watched automatically, and **Measure your local models**
+in the Welcome walkthrough covers the rest.
 
 | Setting | Default | |
 |---|---|---|
-| `inferenceHud.endpoints` | `[]` | Servers to watch, always, even while unreachable |
-| `inferenceHud.autoDetect` | `true` | Also scan well-known localhost ports |
+| `inferenceHud.endpoints` | `[]` | Extra servers to watch, as plain URLs |
+| `inferenceHud.autoDetect` | `true` | Scan well-known localhost ports |
+| `inferenceHud.autoProxy` | `false` | Measure engines that publish nothing, by carrying their traffic |
+| `inferenceHud.autoProxyPort` | `8788` | First port an automatic proxy may claim |
+| `inferenceHud.endpointOverrides` | `[]` | Pin an engine, or set a proxy port by hand |
 | `inferenceHud.statusBarPriority` | `100` | Higher is further left |
 
-`endpoints` takes a plain URL to have the engine detected, or an object to pin
-it — needed for non-default ports, remote hosts, or when two engines share a
-default port:
+`endpoints` is a list of URLs, so the settings editor gives it a real list
+widget. Anything needing more than a URL goes in `endpointOverrides`:
 
 ```jsonc
-"inferenceHud.endpoints": [
-  "http://127.0.0.1:8000",
+"inferenceHud.endpointOverrides": [
   { "url": "http://127.0.0.1:9090", "engine": "llamacpp" },
-  { "url": "http://box.local:8080", "label": "workstation" }
+  { "url": "http://box.local:8080", "label": "workstation" },
+  { "url": "http://127.0.0.1:11434", "proxy": 8788 }
 ]
 ```
 
@@ -149,6 +152,15 @@ Several endpoints can be watched at once. Whichever one is generating owns the
 status bar, so the HUD follows the model you are actually using — VS Code
 exposes no API for reading the chat view's model picker, but the server reports
 which model served each request.
+
+## Driving it from Copilot Chat
+
+Optional: the status bar works whatever sends the traffic. To point Copilot at a
+local model, run **Inference HUD: Set Up Local Model**. It reads the models your
+server actually has, builds the `chatLanguageModels.json` entry with the right
+URL — the proxy's, when one is carrying that engine — and opens the file to
+paste into. Every model is added at once, so switching between them afterwards
+is just the chat model dropdown.
 
 ## Install locally
 

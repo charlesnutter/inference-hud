@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { CompletedStats, TelemetryEvent } from './adapter';
-import { EndpointConfig, ResolvedEndpoint, resolveEndpoints } from './endpoints';
+import { ResolvedEndpoint, resolveEndpoints, configuredEndpoints } from './endpoints';
 import { setUpModel } from './setup';
 
 const RECONNECT_MIN_MS = 1000;
@@ -33,7 +33,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 		const cfg = vscode.workspace.getConfiguration('inferenceHud');
 		const { endpoints, unsupported } = await resolveEndpoints(
-			cfg.get<EndpointConfig[]>('endpoints', []),
+			configuredEndpoints(cfg),
 			cfg.get<boolean>('autoDetect', true),
 			cfg.get<boolean>('autoProxy', false),
 			cfg.get<number>('autoProxyPort', 8788)
@@ -109,6 +109,7 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.workspace.onDidChangeConfiguration(e => {
 			if (
 				e.affectsConfiguration('inferenceHud.endpoints') ||
+				e.affectsConfiguration('inferenceHud.endpointOverrides') ||
 				e.affectsConfiguration('inferenceHud.autoDetect') ||
 				e.affectsConfiguration('inferenceHud.autoProxy') ||
 				e.affectsConfiguration('inferenceHud.autoProxyPort')
