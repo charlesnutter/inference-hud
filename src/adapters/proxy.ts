@@ -34,6 +34,22 @@ import { CompletedStats, Emit, TelemetryAdapter } from '../adapter';
 /** Chunks arriving this far apart end one request and begin another. */
 const IDLE_GAP_MS = 250;
 
+/**
+ * A rate needs a span to be a rate. The first token divided by the millisecond
+ * since it arrived reads as a thousand tokens a second, which flashes in the
+ * status bar before correcting itself — so nothing is reported until there is
+ * enough of an interval for the number to mean something.
+ */
+const MIN_RATE_TOKENS = 2;
+const MIN_RATE_MS = 250;
+
+function rateOf(tokens: number, sinceMs: number): number | null {
+	if (tokens < MIN_RATE_TOKENS || sinceMs < MIN_RATE_MS) {
+		return null;
+	}
+	return tokens / (sinceMs / 1000);
+}
+
 export function proxyAdapter(listenPort: number): TelemetryAdapter {
 	return {
 		id: 'proxy',
@@ -97,7 +113,13 @@ function handle(
 	upstream: URL,
 	emit: Emit
 ): void {
-	const isCompletion = /\/(chat\/)?completions$|\/api\/(chat|generate)$/.test(req.url ?? '');
+	// `/v1/messages` is the Anthropic Messages API, which VS Code's chat can be
+	// pointed at directly — its custom endpoints take an apiType of
+	// `chatCompletions`, `responses` or `messages`. Omitting it here meant that
+	// traffic was forwarded perfectly and measured not at all.
+	const isCompletion = /\/(chat\/)?completions$|\/api\/(chat|generate)$|\/v1\/messages$/.test(
+		req.url ?? ''
+	);
 	// Started here, when the request arrives, rather than when the response
 	// begins — otherwise the clock starts at the first byte and time to first
 	// token measures as zero. The interval between these two points is the
@@ -213,6 +235,26 @@ class StreamWatcher {
 	}
 
 	private absorb(obj: any): void {
+		// The Anthropic Messages stream is a different shape: typed events
+		// rather than choice deltas, with the model and prompt size arriving in
+		// `message_start` and the output count only at `message_delta`.
+		// Note `content_block_*` as well as `message_*`: the text deltas live
+		// under the former, so matching only the latter silently collects the
+		// token counts while measuring no throughput at all.
+		if (
+			typeof obj.type === 'string' &&
+			(obj.type.startsWith('message_') || obj.type.startsWith('content_block'))
+		) {
+			this.absorbAnthropic(obj);
+			return;
+		}
+		// A whole, non-streamed Anthropic reply.
+		if (obj.type === 'message' && Array.isArray(obj.content)) {
+			this.absorbAnthropic({ type: 'message_start', message: obj });
+			this.wholeBody = true;
+			return;
+		}
+
 		this.model = obj.model ?? this.model;
 
 		if (obj.usage) {
@@ -274,11 +316,67 @@ class StreamWatcher {
 		const now = Date.now();
 		if (now - this.lastEmit > 100 && this.tokens > 0) {
 			this.lastEmit = now;
-			const elapsed = (now - this.firstToken) / 1000;
 			this.emit({
 				kind: 'progress',
 				completionTokens: this.tokens,
-				decodeTokS: elapsed > 0 ? this.tokens / elapsed : null
+				decodeTokS: rateOf(this.tokens, now - this.firstToken)
+			});
+		}
+	}
+
+	/**
+	 * Anthropic's streaming events, which carry the same facts in other places:
+	 * `message_start` has the model and input tokens, `content_block_delta`
+	 * carries the text (or the thinking, under extended thinking), and the
+	 * output count lands once at `message_delta`.
+	 */
+	private absorbAnthropic(obj: any): void {
+		if (obj.type === 'message_start') {
+			const m = obj.message ?? {};
+			this.model = m.model ?? this.model;
+			if (m.usage) {
+				this.usage = {
+					prompt: m.usage.input_tokens,
+					completion: m.usage.output_tokens || undefined
+				};
+			}
+			return;
+		}
+		if (obj.type === 'message_delta') {
+			// The authoritative output count, and the only one Anthropic sends.
+			if (obj.usage?.output_tokens) {
+				this.usage = { prompt: this.usage?.prompt, completion: obj.usage.output_tokens };
+			}
+			return;
+		}
+		if (obj.type !== 'content_block_delta') {
+			return;
+		}
+
+		const d = obj.delta ?? {};
+		const think: string | undefined = d.thinking;
+		const said: string | undefined = d.text ?? d.partial_json;
+		const delta = typeof think === 'string' && think !== '' ? think : said;
+		if (typeof delta !== 'string' || delta === '') {
+			return;
+		}
+
+		if (this.firstToken === 0) {
+			this.firstToken = Date.now();
+			this.emit({ kind: 'prefill', done: null, total: null });
+		}
+		this.tokens += 1;
+		if (typeof think === 'string' && think !== '') {
+			this.reasoningTokens++;
+		}
+
+		const now = Date.now();
+		if (now - this.lastEmit > 100) {
+			this.lastEmit = now;
+			this.emit({
+				kind: 'progress',
+				completionTokens: this.tokens,
+				decodeTokS: rateOf(this.tokens, now - this.firstToken)
 			});
 		}
 	}

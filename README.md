@@ -78,6 +78,10 @@ on, then pointing your client at that port instead of the engine:
 ]
 ```
 
+Both wire formats are read: OpenAI chat completions and Anthropic Messages
+(`/v1/messages`), which VS Code's chat can be pointed at directly — its custom
+endpoints take an `apiType` of `chatCompletions`, `responses` or `messages`.
+
 It forwards bytes untouched and never modifies a request, so it cannot change
 what your client receives. Token counts come from `usage` when the upstream
 sends it and from counting stream chunks when it does not — the tooltip says
