@@ -46,6 +46,24 @@ done
 echo
 
 # ------------------------------------------------------- server-wide surface ---
+# Which wire formats it speaks. This does not affect whether the engine can be
+# watched — a polled engine is measured from /metrics no matter what its clients
+# talk — but it decides what a proxy has to parse, and which apiType a VS Code
+# custom endpoint should use.
+echo "WIRE FORMATS"
+probe_fmt() {
+  c=$(curl -s -m 5 -o /dev/null -w '%{http_code}' -X POST "$BASE$1" \
+        -H 'Content-Type: application/json' \
+        -d '{"model":"x","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' 2>/dev/null)
+  case "$c" in
+    200|400|422) printf '  %-22s %s  %s\n' "$1" "$c" "$2" ;;
+    *)           printf '  %-22s %s  not served\n' "$1" "$c" ;;
+  esac
+}
+probe_fmt /v1/chat/completions "OpenAI chat completions (apiType chatCompletions)"
+probe_fmt /v1/messages         "Anthropic Messages (apiType messages)"
+echo
+
 echo "SERVER-WIDE TELEMETRY"
 mode=proxy
 detail=""
@@ -108,8 +126,9 @@ case "$mode" in
           echo "  Supportable with a poll adapter. Run again with --live to find out"
           echo "  whether the counters move during generation or only at completion." ;;
   proxy)  echo "  PROXY-ONLY — nothing server-wide was found."
-          echo "  Telemetry, if any, is returned only to whoever made the request, so"
-          echo "  this engine needs the proxy mode, which is not built yet." ;;
+          echo "  Telemetry, if any, goes only to whoever made the request, so this"
+          echo "  engine must be measured by carrying its traffic. Set"
+          echo "  inferenceHud.autoProxy to true, then point your client at the proxy." ;;
 esac
 echo
 

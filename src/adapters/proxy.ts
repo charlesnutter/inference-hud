@@ -198,6 +198,8 @@ class StreamWatcher {
 	private reasoningTokens = 0;
 	/** True when the response arrived in one piece rather than as a stream. */
 	private wholeBody = false;
+	/** Prompt tokens the upstream said came from cache rather than compute. */
+	private cachedTokens?: number;
 	private lastEmit = 0;
 	/** Exact counts, when the upstream volunteers them. */
 	private usage?: { prompt?: number; completion?: number };
@@ -335,8 +337,16 @@ class StreamWatcher {
 			const m = obj.message ?? {};
 			this.model = m.model ?? this.model;
 			if (m.usage) {
+				// Anthropic's `input_tokens` counts only what was *not* served
+				// from cache, so on a warm prefix it reads as a handful of
+				// tokens for a prompt of thousands. The prompt is the sum, the
+				// same accounting llama.cpp's slots needed.
+				const cached =
+					(m.usage.cache_read_input_tokens ?? 0) +
+					(m.usage.cache_creation_input_tokens ?? 0);
+				this.cachedTokens = cached || undefined;
 				this.usage = {
-					prompt: m.usage.input_tokens,
+					prompt: (m.usage.input_tokens ?? 0) + cached || undefined,
 					completion: m.usage.output_tokens || undefined
 				};
 			}
@@ -386,6 +396,21 @@ class StreamWatcher {
 			return;
 		}
 		this.done = true;
+
+		// A whole-body response is one JSON object with no trailing newline, so
+		// `consume` holds all of it back as an incomplete line. Without this
+		// flush nothing is ever parsed and the request reports nothing at all —
+		// which only shows up on engines whose bodies happen not to end in a
+		// newline, making it the kind of bug that looks like it works.
+		const tail = this.buffer.trim();
+		this.buffer = '';
+		if (tail.startsWith('{')) {
+			try {
+				this.absorb(JSON.parse(tail));
+			} catch {
+				/* not a complete object; nothing to salvage */
+			}
+		}
 		const end = Date.now();
 		if (this.firstToken === 0 && !this.usage) {
 			return; // Not a generation, or it failed. Nothing to report.
@@ -402,6 +427,8 @@ class StreamWatcher {
 		const stats: CompletedStats = {
 			model: this.model,
 			promptTokens: this.usage?.prompt,
+			cachedTokens: this.cachedTokens,
+			cacheSource: this.cachedTokens ? 'prompt cache' : undefined,
 			completionTokens: completion,
 			decodeTokS: decodeElapsedS && decodeElapsedS > 0 ? completion / decodeElapsedS : undefined,
 			requestTokS: requestElapsedS > 0 ? completion / requestElapsedS : undefined,

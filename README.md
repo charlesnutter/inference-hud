@@ -164,6 +164,16 @@ To choose the port yourself instead:
 generated tokens under either, since a thinking model can spend an entire
 response in them.
 
+Wire format and telemetry are independent. An engine that is *observable* is
+measured from its metrics endpoint whatever its clients speak, so llama.cpp
+serving `/v1/messages` changes nothing about how it is watched. The format only
+matters here, in the proxy, because this is the one place the traffic itself is
+read. `scripts/probe.sh` reports which formats a server offers.
+
+Anthropic's `input_tokens` counts only what was **not** served from cache, so a
+warm prefix reads as a handful of tokens for a prompt of thousands; the prompt
+is reported as the sum, with the cached share shown separately.
+
 The proxy forwards bytes untouched and never modifies a request, so it cannot
 change what your client receives; a parse failure can only cost a number. Token
 counts come from `usage` when the upstream sends it and from counting stream
