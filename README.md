@@ -109,6 +109,9 @@ llama-server -m model.gguf --port 8080 --metrics     # else: live progress, no t
 python -m sglang.launch_server --enable-metrics      # else: no /metrics at all
 ```
 
+Forget either and the HUD says so rather than failing quietly — both engines are
+still detected without the flag, and the missing one is named.
+
 **What polling recovers varies more than the shared endpoint suggests.** vLLM's
 counters advance *during* generation, so `/metrics` alone drives a live readout.
 llama.cpp's stay frozen until a request ends, so it needs `/slots` for progress

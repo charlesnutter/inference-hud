@@ -45,6 +45,15 @@ interface PromSpec {
 	modelLabel: string;
 	/** Metric-name prefix, used to confirm the engine is the one we expect. */
 	prefix: string;
+	/**
+	 * A path that answers whenever the server is up, whether or not metrics are
+	 * enabled. Used to tell "the server is gone" apart from "the server is here
+	 * but not reporting", which are the same failed scrape and completely
+	 * different problems.
+	 */
+	identityPath: string;
+	/** Flag that turns metrics on, where they are not on by default. */
+	metricsFlag?: string;
 }
 
 const VLLM: PromSpec = {
@@ -57,7 +66,8 @@ const VLLM: PromSpec = {
 	ttftSum: 'vllm:time_to_first_token_seconds_sum',
 	ttftCount: 'vllm:time_to_first_token_seconds_count',
 	modelLabel: 'model_name',
-	prefix: 'vllm:'
+	prefix: 'vllm:',
+	identityPath: '/v1/models'
 };
 
 const SGLANG: PromSpec = {
@@ -71,7 +81,10 @@ const SGLANG: PromSpec = {
 	ttftCount: 'sglang:time_to_first_token_seconds_count',
 	throughputGauge: 'sglang:gen_throughput',
 	modelLabel: 'model_name',
-	prefix: 'sglang:'
+	prefix: 'sglang:',
+	// SGLang mounts /metrics only under --enable-metrics, which defaults off.
+	identityPath: '/model_info',
+	metricsFlag: '--enable-metrics'
 };
 
 /** One scrape, reduced to the handful of numbers this adapter reasons about. */
@@ -97,6 +110,23 @@ function makeAdapter(spec: PromSpec): TelemetryAdapter {
 
 			const first = await scrape(base, spec, signal);
 			if (!first) {
+				// A failed scrape means one of two very different things. If the
+				// server itself answers, it is running and simply not reporting,
+				// which is a flag away from working — and saying so is the whole
+				// reason detection fingerprints an identity path rather than
+				// /metrics. Retrying silently would leave the user watching an
+				// endpoint that can never connect, with the fix unmentioned.
+				if (await reachable(`${base}${spec.identityPath}`, signal)) {
+					emit({
+						kind: 'notice',
+						level: 'warn',
+						message: spec.metricsFlag
+							? `${spec.displayName} is running but serves no /metrics. Restart it ` +
+								`with ${spec.metricsFlag} for any telemetry at all.`
+							: `${spec.displayName} is running but serves no /metrics, so it ` +
+								'cannot be measured.'
+					});
+				}
 				throw new Error(`no ${spec.displayName} metrics at ${base}`);
 			}
 			emit({ kind: 'connected' });
@@ -253,6 +283,16 @@ function toStats(
 		contextLen: promptTokens + completionTokens,
 		extra
 	};
+}
+
+/** Does anything answer here? Used only to explain a failed scrape. */
+async function reachable(url: string, signal: AbortSignal): Promise<boolean> {
+	try {
+		const res = await fetch(url, { signal, headers: { connection: 'close' } });
+		return res.ok;
+	} catch {
+		return false;
+	}
 }
 
 async function scrape(
