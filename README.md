@@ -136,6 +136,7 @@ reading the stream as it passes.
 | **Ollama** | 11434 | No `/metrics` endpoint at all (verified). `eval_count`/`eval_duration` go to the caller and nowhere else |
 | **LM Studio** | 1234 | Per-response `stats` only — `tokens_per_second`, `time_to_first_token` |
 | **LocalAI** | 8080 | `/metrics` exists but carries HTTP-level `api_call` histograms, no token counters |
+| **TensorRT-LLM** | 8000 | `/metrics` exists but carries only latency histograms, no token counters |
 | **Any OpenAI-compatible server** | 8000, 8080, 1234, 5000, 4891, 8090 | Unrecognised engine; only the `usage` block is guaranteed |
 
 Ollama is the clearest illustration of why this section exists: it serves all
@@ -144,7 +145,9 @@ response, and none of it is visible from outside the request.
 
 Rich response telemetry is not server-wide telemetry — that distinction is the
 whole reason this section is separate. An engine can report excellent numbers
-and still be invisible.
+and still be invisible. Nor does serving Prometheus settle it: LocalAI,
+mistral.rs and TensorRT-LLM all expose `/metrics` and none of them counts
+tokens, which is the only thing a throughput readout can be built from.
 
 Turn it on by letting detection do it:
 

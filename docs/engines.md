@@ -119,11 +119,44 @@ CUDA or ROCm only, so no local verification is possible on this machine:
   own prefix. Plausibly a `PromSpec` entry and little else.
 - **TGI** — Prometheus on the inference port. Docker on a Mac gets no GPU and
   the images are linux/amd64, so it is not practically testable here.
-- **ExLlamaV2** (via TabbyAPI), **TensorRT-LLM**.
-- **Triton Inference Server** — the real observability layer behind
-  TensorRT-LLM, which has none of its own. Prometheus, but on a **separate
-  port** (8002 by default), so it needs a change to the port map rather than
-  just a spec entry.
+- **ExLlamaV2** (via TabbyAPI).
+- **TensorRT-LLM** — **proxy-only, settled 2026-09-11 from documentation.**
+  `trtllm-serve` is OpenAI-compatible and does serve `/metrics` under a
+  `trtllm_` prefix, contradicting an earlier note here that said it had no
+  observability of its own. But the metrics are the wrong kind. As of 1.1.0rc5
+  the endpoint exposes exactly five series:
+
+  | Metric | Type |
+  |---|---|
+  | `trtllm_request_success_total` | Counter |
+  | `trtllm_time_to_first_token_seconds` | Histogram |
+  | `trtllm_e2e_request_latency_seconds` | Histogram |
+  | `trtllm_time_per_output_token_seconds` | Histogram |
+  | `trtllm_request_queue_time_seconds` | Histogram |
+
+  There are **no token counters and no running-request gauge**, and the poll
+  adapter is built on exactly those two things: differencing token counters for
+  the rate, and the gauge for busy/idle. Neither exists, so no `PromSpec` can be
+  written against it.
+
+  `trtllm_time_per_output_token_seconds` is the inverse of tokens per second and
+  could yield an average rate from its sum and count — but as an all-time
+  average over every request since start, the same limitation that makes the
+  TTFT histogram unusable per-request. No live readout, no token counts, no
+  idle detection.
+
+  Two further wrinkles if this is ever revisited: the PyTorch backend needs
+  `enable_iter_perf_stats` set in a YAML config before it reports anything at
+  all, and NVIDIA documents the metric names as subject to change between
+  versions.
+
+  Being OpenAI-compatible, it is fully measurable **through the proxy** —
+  exactly, live, and per-request. That is the supported path.
+- **Triton Inference Server** — a separate question, and still unverified.
+  Prometheus on its own port (8002 by default, not the inference port), which
+  would need a change to the port map rather than just a spec entry. Its
+  standard `nv_inference_*` metrics are request-level rather than token-level,
+  so the same doubt applies.
 
 ### Cannot be supported at all
 
