@@ -135,6 +135,10 @@ reading the stream as it passes.
 | **LocalAI** | 8080 | `/metrics` exists but carries HTTP-level `api_call` histograms, no token counters |
 | **Any OpenAI-compatible server** | 8000, 8080, 1234, 5000, 4891, 8090 | Unrecognised engine; only the `usage` block is guaranteed |
 
+Ollama is the clearest illustration of why this section exists: it serves all
+three wire formats and reports `eval_count` and `eval_duration` on every
+response, and none of it is visible from outside the request.
+
 Rich response telemetry is not server-wide telemetry — that distinction is the
 whole reason this section is separate. An engine can report excellent numbers
 and still be invisible.
@@ -158,21 +162,36 @@ To choose the port yourself instead:
 ]
 ```
 
-**Both wire formats are read**: OpenAI chat completions, and Anthropic Messages
-(`/v1/messages`) — VS Code's custom endpoints take an `apiType` of
-`chatCompletions`, `responses` or `messages`. Reasoning tokens count as
-generated tokens under either, since a thinking model can spend an entire
-response in them.
+### Wire formats
 
-Wire format and telemetry are independent. An engine that is *observable* is
-measured from its metrics endpoint whatever its clients speak, so llama.cpp
-serving `/v1/messages` changes nothing about how it is watched. The format only
-matters here, in the proxy, because this is the one place the traffic itself is
-read. `scripts/probe.sh` reports which formats a server offers.
+VS Code's custom endpoints take an `apiType` of `chatCompletions`, `responses`
+or `messages`, and local engines increasingly serve all three. Verified on
+llama.cpp b9860 and Ollama 0.32.15, both of which answer every one:
 
-Anthropic's `input_tokens` counts only what was **not** served from cache, so a
-warm prefix reads as a handful of tokens for a prompt of thousands; the prompt
-is reported as the sum, with the cached share shown separately.
+| Path | `apiType` | Read by the proxy |
+|---|---|---|
+| `/v1/chat/completions` | `chatCompletions` | ✅ |
+| `/v1/messages` — Anthropic Messages | `messages` | ✅ |
+| `/v1/responses` — OpenAI Responses | `responses` | ❌ **not yet** |
+
+`responses` is a third event shape again — `response.output_text.delta` rather
+than a choice delta or a content block — and is currently forwarded unmeasured.
+If you point a client at it the generation works and the status bar stays quiet.
+
+Reasoning tokens count as generated tokens under both supported formats, since a
+thinking model can spend an entire response in them.
+
+**Wire format and telemetry are independent.** An observable engine is measured
+from its metrics endpoint whatever its clients speak, so llama.cpp serving
+`/v1/messages` changes nothing about how it is watched. The format only matters
+here, in the proxy, because this is the one place the traffic itself is read.
+`scripts/probe.sh` reports which formats a server offers.
+
+Both non-OpenAI formats report cache reads separately from new prompt tokens —
+Anthropic as `cache_read_input_tokens`, Responses as
+`input_tokens_details.cached_tokens` — so `input_tokens` alone reads as a
+handful of tokens for a prompt of thousands on a warm prefix. The prompt is
+reported as the sum, with the cached share shown separately.
 
 The proxy forwards bytes untouched and never modifies a request, so it cannot
 change what your client receives; a parse failure can only cost a number. Token

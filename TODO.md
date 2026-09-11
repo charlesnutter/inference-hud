@@ -100,6 +100,31 @@ proxy, except permanent and much larger.
 Order: A, then B, then C only as a considered decision once the HUD itself is
 finished.
 
+## Proxy: the Responses wire format is unread
+
+VS Code custom endpoints take an `apiType` of `chatCompletions`, `responses` or
+`messages`. The proxy reads the first two and forwards the third unmeasured, so
+a client pointed at `/v1/responses` generates normally and the status bar stays
+quiet.
+
+This is reachable now, not hypothetical: llama.cpp b9860 and Ollama 0.32.15 both
+serve all three. Captured from llama.cpp:
+
+```
+non-streamed: {"object":"response","output":[{"content":[{"type":"output_text","text":"..."}]}],
+               "usage":{"input_tokens":31,"output_tokens":10,
+                        "input_tokens_details":{"cached_tokens":24}}}
+streamed:     response.created, response.in_progress, response.output_item.added,
+              response.output_text.delta (one per token), response.output_text.done,
+              response.output_item.done
+```
+
+So it is a third dispatch in `absorb`, matching `type` prefixed
+`response.`, with the text at `delta` on `response.output_text.delta` and the
+totals in the final object's `usage`. `input_tokens_details.cached_tokens` needs
+adding back the same way Anthropic's `cache_read_input_tokens` does, or a warm
+prefix under-reports the prompt.
+
 ## Engine support
 
 See the support matrix in README.md. Detection is wired up and the poll adapter
