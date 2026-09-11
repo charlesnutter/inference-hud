@@ -4,104 +4,36 @@ Live **tokens/sec**, token counts, and time-to-first-token for local inference
 servers — in the VS Code status bar, while you work.
 
 ```
-⚡ 40.9 tok/s · 114
+⚡ qwen2.5-0.5b · 40.9 tok/s · 114 tok
 ```
 
 It reports on generations driven by **any** client, including GitHub Copilot's
 Agent mode, which shows you a duration and nothing else. Nothing leaves your
 machine; the extension reads a localhost endpoint and paints a number.
 
-## Why this exists
+Early days. MTPLX, llama.cpp and vLLM are verified end to end; Ollama, LM Studio
+and anything else OpenAI- or Anthropic-compatible work through the proxy. See
+[Supported engines](#supported-engines) for the state of each.
 
-Local inference engines almost all measure throughput accurately. The problem is
-who they report it to. MTPLX, for example, already computes everything you'd
-want and sends it in the final chunk of every completion —
+## Install
 
-```
-usage:        {prompt_tokens: 177, completion_tokens: 120}
-timings:      {predicted_per_second: 40.494, prompt_per_second: 227.491}
-mtplx_stats:  {ttft_s: 0.782, decode_tok_s: 40.49, request_elapsed_s: 3.74, ...}
-```
-
-— and Copilot's custom-endpoint provider discards all of it, logging only
-`20100ms`. The numbers exist. Nothing surfaces them.
-
-## Status
-
-Early. MTPLX, llama.cpp and vLLM work end to end. SGLang shares vLLM's adapter
-and is written against its published metric definitions, but has not been run
-against a live server yet.
-
-Two engines need a flag before they report anything. Start `llama-server` with
-`--metrics` — without it the HUD still shows live progress from `/slots`, but
-per-request totals are unavailable and it will say so. Start SGLang with
-`--enable-metrics`, without which it serves no `/metrics` at all.
-
-| Engine | Passive telemetry | Enabled by default | Supported |
-|---|---|---|---|
-| **MTPLX** | `/v1/mtplx/metrics/stream` (SSE, per-request) | yes | ✅ |
-| **llama.cpp** | `/slots` for live progress + `/metrics` for totals | `/slots` yes, `/metrics` **no** | ✅ |
-| **vLLM** | `/metrics` (Prometheus) | yes | ✅ |
-| **SGLang** | `/metrics` (Prometheus) | **no** — needs `--enable-metrics` | ⚠️ untested against a live server |
-| **oMLX** | `/admin/api/stats` (needs admin auth) | yes, gated | planned |
-| **Ollama** | none — no `/metrics` endpoint (verified) | — | ✅ via proxy |
-| **LM Studio** | none — per-response `stats` only | — | ✅ via proxy |
-| **LocalAI** | `/metrics` exists but is HTTP-level only, no token counters | — | ✅ via proxy |
-
-Engines split into two classes, and the split drives the design:
-
-- **Observable** — the server publishes throughput server-wide, so the extension
-  just listens. It never sits in the request path and the client never knows it
-  exists. MTPLX pushes over SSE; llama.cpp, vLLM and SGLang expose counters to
-  poll and difference.
-
-  How much polling recovers varies more than the shared endpoint suggests.
-  vLLM's counters advance *during* generation, so `/metrics` alone drives a live
-  readout; llama.cpp's stay frozen until a request ends, so it needs `/slots`
-  for progress and `/metrics` for totals. SGLang goes furthest and publishes
-  `sglang:gen_throughput` as a gauge, so its rate needs no differencing at all.
-  On both Prometheus engines time-to-first-token is a Histogram, so only a
-  running average is recoverable — never the last request's value — and the HUD
-  labels it as such rather than showing it as a per-request figure.
-- **Proxy-only** — telemetry is returned solely to whoever made the request.
-  Ollama's `eval_count`/`eval_duration` go to the caller and nowhere else, and it
-  serves no `/metrics` at all. Observing these means forwarding the request.
-
-The proxy path works for *any* OpenAI-compatible server, even one that reports
-no timings whatsoever: holding the socket makes time-to-first-byte the TTFT and
-last-byte the decode duration. Enable it by giving an endpoint a port to listen
-on, then pointing your client at that port instead of the engine:
-
-```jsonc
-"inferenceHud.endpoints": [
-  { "url": "http://127.0.0.1:11434", "proxy": 8788 }
-]
+```bash
+npx @vscode/vsce package
+code --install-extension inference-hud-0.0.1.vsix --force
 ```
 
-Both wire formats are read: OpenAI chat completions and Anthropic Messages
-(`/v1/messages`), which VS Code's chat can be pointed at directly — its custom
-endpoints take an `apiType` of `chatCompletions`, `responses` or `messages`.
-
-It forwards bytes untouched and never modifies a request, so it cannot change
-what your client receives. Token counts come from `usage` when the upstream
-sends it and from counting stream chunks when it does not — the tooltip says
-which. Streaming is where a proxy beats polling outright: the tokens are
-physically passing through, so the rate is live and per-request rather than
-sampled.
-
-`src/engines.ts` contains the detection registry — it fingerprints the engines
-above across their default ports in under 50ms. Engines listed as `via proxy`
-are recognised but skipped, with the reason written to the log.
+`--force` matters while iterating: without it, installing refuses to replace an
+extension already present at the same version. Remove it with
+`code --uninstall-extension charlesnutter.inference-hud`.
 
 ## Run it
+
+For development, open the folder and press <kbd>F5</kbd>. An Extension
+Development Host launches with the extension loaded.
 
 ```bash
 npm install
 ```
-
-Then open the folder in VS Code and press <kbd>F5</kbd>. An Extension
-Development Host launches with the extension loaded; send a prompt through
-Copilot Agent mode with your local endpoint selected.
 
 | State | Status bar |
 |---|---|
@@ -157,7 +89,91 @@ status bar, so the HUD follows the model you are actually using — VS Code
 exposes no API for reading the chat view's model picker, but the server reports
 which model served each request.
 
-## Driving it from Copilot Chat
+## Supported engines
+
+These publish throughput **server-wide**, so the extension just listens. It
+never sits in the request path and your client never knows it exists.
+
+| Engine | Default ports | Telemetry | On by default | State |
+|---|---|---|---|---|
+| **MTPLX** | 8000 | `/v1/mtplx/metrics/stream` — SSE push, per-request | yes | ✅ verified |
+| **llama.cpp** | 8080, 8081 | `/slots` for live progress + `/metrics` for totals | `/slots` yes, `/metrics` **no** | ✅ verified |
+| **vLLM** | 8000 | `/metrics` — Prometheus counters | yes | ✅ verified |
+| **SGLang** | 30000 | `/metrics` — Prometheus, plus a `gen_throughput` gauge | **no** | ⚠️ untested live |
+| **oMLX** | 8000, 8080 | `/admin/api/stats`, behind admin auth | gated | planned |
+
+Two need a flag before they report anything:
+
+```bash
+llama-server -m model.gguf --port 8080 --metrics     # else: live progress, no totals
+python -m sglang.launch_server --enable-metrics      # else: no /metrics at all
+```
+
+**What polling recovers varies more than the shared endpoint suggests.** vLLM's
+counters advance *during* generation, so `/metrics` alone drives a live readout.
+llama.cpp's stay frozen until a request ends, so it needs `/slots` for progress
+and `/metrics` for totals. SGLang publishes `sglang:gen_throughput` as a gauge,
+so its rate needs no differencing at all. On both Prometheus engines
+time-to-first-token is a Histogram, so only a running average is recoverable —
+never the last request's value — and the HUD labels it as such rather than
+passing it off as a per-request figure.
+
+MTPLX is the richest: it pushes per-request telemetry over SSE, so there is
+nothing to poll and nothing to estimate.
+
+## Proxy engines
+
+These return their numbers **only to whoever made the request**. There is
+nothing to watch from outside, so the only way to see them is to carry the
+traffic: the extension listens on a local port and forwards to the engine,
+reading the stream as it passes.
+
+| Engine | Default port | Why it needs a proxy |
+|---|---|---|
+| **Ollama** | 11434 | No `/metrics` endpoint at all (verified). `eval_count`/`eval_duration` go to the caller and nowhere else |
+| **LM Studio** | 1234 | Per-response `stats` only — `tokens_per_second`, `time_to_first_token` |
+| **LocalAI** | 8080 | `/metrics` exists but carries HTTP-level `api_call` histograms, no token counters |
+| **Any OpenAI-compatible server** | 8000, 8080, 1234, 5000, 4891, 8090 | Unrecognised engine; only the `usage` block is guaranteed |
+
+Rich response telemetry is not server-wide telemetry — that distinction is the
+whole reason this section is separate. An engine can report excellent numbers
+and still be invisible.
+
+Turn it on by letting detection do it:
+
+```jsonc
+"inferenceHud.autoProxy": true
+```
+
+Then point your client's base URL at the proxy rather than the engine. The
+extension tells you the URL and offers to copy it. **Traffic sent straight to
+the engine still works and simply is not measured**, which is the most confusing
+way for this to fail — so it is worth getting right once.
+
+To choose the port yourself instead:
+
+```jsonc
+"inferenceHud.endpointOverrides": [
+  { "url": "http://127.0.0.1:11434", "proxy": 8788 }
+]
+```
+
+**Both wire formats are read**: OpenAI chat completions, and Anthropic Messages
+(`/v1/messages`) — VS Code's custom endpoints take an `apiType` of
+`chatCompletions`, `responses` or `messages`. Reasoning tokens count as
+generated tokens under either, since a thinking model can spend an entire
+response in them.
+
+The proxy forwards bytes untouched and never modifies a request, so it cannot
+change what your client receives; a parse failure can only cost a number. Token
+counts come from `usage` when the upstream sends it and from counting stream
+chunks when it does not — the tooltip says which. Streaming is where a proxy
+beats polling outright: the tokens are physically passing through, so the rate
+is live and per-request rather than sampled.
+
+It is off by default because it opens a listening socket on `127.0.0.1`.
+
+## Running from Copilot
 
 Optional: the status bar works whatever sends the traffic. To point Copilot at a
 local model, run **Inference HUD: Set Up Local Model**. It reads the models your
@@ -166,12 +182,29 @@ URL — the proxy's, when one is carrying that engine — and opens the file to
 paste into. Every model is added at once, so switching between them afterwards
 is just the chat model dropdown.
 
-## Install locally
+Note that agent mode sends its tool schemas on every request, which can be 15k
+tokens before your prompt. A model small enough to run comfortably on a laptop
+will usually not tool-call well regardless of context size.
 
-```bash
-npx @vscode/vsce package
-code --install-extension inference-hud-0.0.1.vsix
+## Why this exists
+
+Local inference engines almost all measure throughput accurately. The problem is
+who they report it to. MTPLX, for example, already computes everything you'd
+want and sends it in the final chunk of every completion —
+
 ```
+usage:        {prompt_tokens: 177, completion_tokens: 120}
+timings:      {predicted_per_second: 40.494, prompt_per_second: 227.491}
+mtplx_stats:  {ttft_s: 0.782, decode_tok_s: 40.49, request_elapsed_s: 3.74, ...}
+```
+
+— and Copilot's custom-endpoint provider discards all of it, logging only
+`20100ms`. The numbers exist. Nothing surfaces them.
+
+`src/engines.ts` holds the detection registry, fingerprinting every engine above
+across its default ports in under 50ms. `scripts/probe.sh` answers the same
+question for anything not listed: point it at a server and it classifies the
+telemetry as stream, poll, or proxy-only.
 
 ## License
 
