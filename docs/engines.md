@@ -98,7 +98,7 @@ exclusively to the caller. Rich response telemetry is not server-wide telemetry.
 | Engine | Expected telemetry | Install |
 |---|---|---|
 | **oMLX** | `/admin/api/stats`, server-wide but behind admin auth — needs a `SecretStorage` path before it can be supported | already installed; start its server from the app |
-| **`mlx_lm.server`** | Unknown. Apple's own reference server, distinct from MTPLX and oMLX | `uv pip install mlx-lm` |
+| **`mlx_lm.server`** | **Proxy-only.** Its own SERVER.md documents exactly two endpoints, `/v1/chat/completions` and `/v1/models` — no `/metrics`, no Prometheus. It does return an exact `usage` block with `prompt_tokens`/`completion_tokens`, which makes it an ideal proxy target: no chunk-counting estimate needed. Not yet probed live | `uv pip install mlx-lm` |
 | **KoboldCpp** | `/api/extra/perf` — documented to carry `last_process_time`, `last_eval_time`, `last_input_count`, `last_token_count`, plus idle/busy. That is a complete per-request set, so it is probably **pollable, not proxy-only** | macOS arm64 build from its releases page |
 | **LM Studio** | Per-response `stats` (`tokens_per_second`, `time_to_first_token`) only, so **expected proxy-only**. `/api/v0/models` gives loaded state | download the app, enable the local server |
 | **llamafile** | llama.cpp-derived, so may inherit `/slots` and `/metrics` | single-file download |
@@ -119,7 +119,9 @@ CUDA or ROCm only, so no local verification is possible on this machine:
   own prefix. Plausibly a `PromSpec` entry and little else.
 - **TGI** — Prometheus on the inference port. Docker on a Mac gets no GPU and
   the images are linux/amd64, so it is not practically testable here.
-- **ExLlamaV2** (via TabbyAPI).
+- **ExLlamaV2**, served via **TabbyAPI** — OpenAI-compatible, with no evidence
+  of a metrics endpoint in its documentation. **Unverified**, and not checkable
+  here: ExLlamaV2 is CUDA-only. Expected proxy-only.
 - **TensorRT-LLM** — **proxy-only, settled 2026-09-11 from documentation.**
   `trtllm-serve` is OpenAI-compatible and does serve `/metrics` under a
   `trtllm_` prefix, contradicting an earlier note here that said it had no

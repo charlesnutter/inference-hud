@@ -131,13 +131,31 @@ nothing to watch from outside, so the only way to see them is to carry the
 traffic: the extension listens on a local port and forwards to the engine,
 reading the stream as it passes.
 
-| Engine | Default port | Why it needs a proxy |
-|---|---|---|
-| **Ollama** | 11434 | No `/metrics` endpoint at all (verified). `eval_count`/`eval_duration` go to the caller and nowhere else |
-| **LM Studio** | 1234 | Per-response `stats` only — `tokens_per_second`, `time_to_first_token` |
-| **LocalAI** | 8080 | `/metrics` exists but carries HTTP-level `api_call` histograms, no token counters |
-| **TensorRT-LLM** | 8000 | `/metrics` exists but carries only latency histograms, no token counters |
-| **Any OpenAI-compatible server** | 8000, 8080, 1234, 5000, 4891, 8090 | Unrecognised engine; only the `usage` block is guaranteed |
+| Engine | Default port | Why it needs a proxy | How we know |
+|---|---|---|---|
+| **Ollama** | 11434 | No `/metrics` endpoint at all. `eval_count`/`eval_duration` go to the caller and nowhere else | probed live |
+| **LocalAI** | 8080 | `/metrics` exists but carries HTTP-level `api_call` histograms, no token counters | probed live |
+| **LM Studio** | 1234 | Per-response `stats` only — `tokens_per_second`, `time_to_first_token` | documented |
+| **MLX-LM** (`mlx_lm.server`) | 8080 | Serves only `/v1/chat/completions` and `/v1/models`. Returns an exact `usage` block — to the caller | documented |
+| **TensorRT-LLM** (`trtllm-serve`) | 8000 | `/metrics` exists but is four latency histograms and a success counter: no token counters, no running-request gauge | documented |
+| **ExLlamaV2** (via TabbyAPI) | 5000 | OpenAI-compatible; no evidence of a metrics endpoint | **unverified** |
+| **Any OpenAI-compatible server** | 8000, 8080, 1234, 5000, 4891, 8090 | Unrecognised engine; only the `usage` block is guaranteed | — |
+
+MLX-LM is the easiest of these to settle: it runs natively on Apple Silicon, so
+`uv pip install mlx-lm` and a `./scripts/probe.sh` run would confirm it in
+minutes. TensorRT-LLM and ExLlamaV2 are CUDA-only and cannot be checked here at
+all.
+
+**TensorRT-LLM caveats**, if it is ever revisited:
+
+- The five metrics are as of **1.1.0rc5**, and NVIDIA documents the names as
+  subject to change between versions.
+- The **PyTorch backend** reports nothing at all until `enable_iter_perf_stats`
+  is set in a YAML config; the TensorRT backend is on by default.
+- `trtllm_time_per_output_token_seconds` is the inverse of throughput and its
+  sum over count would give an average rate — but an all-time average across
+  every request since the server started, never the last one. The same reason
+  the TTFT histogram cannot fill a per-request row.
 
 Ollama is the clearest illustration of why this section exists: it serves all
 three wire formats and reports `eval_count` and `eval_duration` on every
