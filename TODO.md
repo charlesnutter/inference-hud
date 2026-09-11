@@ -159,9 +159,19 @@ None of these three has been verified; no source read, no live server.**
 - **Aphrodite** — a vLLM fork, so it should expose the same counters under its
   own metric prefix. Highest-confidence guess of the three.
 - **TGI** — Hugging Face's engine, Prometheus on the inference port.
-- **Triton Inference Server** — the real observability layer behind
-  TensorRT-LLM, which has none of its own. Prometheus, but on a *separate* port
-  (8002 by default), so it needs a change to the port map, not just a spec.
+- **Triton Inference Server** — Prometheus on a *separate* port (8002 by
+  default), so it needs a change to the port map, not just a spec. Its standard
+  `nv_inference_*` series are request-level, so whether it counts tokens at all
+  is unverified.
+
+**TensorRT-LLM is settled and is not a candidate.** An earlier version of this
+note said it had no observability of its own and that Triton was the answer;
+both halves were wrong. `trtllm-serve` serves `/metrics` under a `trtllm_`
+prefix — and as of 1.1.0rc5 that is five series, four latency histograms plus a
+success counter, with no token counters and no running-request gauge. The poll
+adapter needs precisely those two, so there is no spec to write. It is
+OpenAI-compatible, so the proxy measures it exactly and live; that is the
+supported path. Details in `docs/engines.md`.
 
 **Worth investigating before assuming proxy-only:**
 
