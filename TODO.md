@@ -56,6 +56,50 @@ a number printed in a README starts looking authoritative. Two ways out:
 
 Option 1 unless proxying several engines at once becomes common.
 
+## Getting a new user running without JSON editing
+
+Today a first-time Ollama user has to edit two files and invent a number: an
+`endpoints` entry in `settings.json` naming a proxy port they choose, and a
+model in `chatLanguageModels.json` pointing at that port. Neither step is
+guessable from the UI, and the port has no discoverable right answer.
+
+Picking the *engine* from a dropdown does not help — detection already
+fingerprints Ollama on 11434 without being told, and knows whether it is
+actually running, which a dropdown cannot. The friction is the proxy port and
+the hand-edited model entry, not the engine's address.
+
+**A. Auto-proxy on detection.** When detection finds a proxy-only engine, start
+a proxy for it and report the URL, instead of listing it as unsupported. Kills
+the `settings.json` step and the invented port outright. Gate it behind a
+setting, since it opens a listening socket, and offer that setting as a button
+on the notice so enabling it is one click rather than a JSON edit.
+
+**B. A setup command.** `Inference HUD: Set Up Local Model` — QuickPick a
+detected endpoint, QuickPick a model from its `/v1/models`, then write or
+clipboard the `chatLanguageModels.json` block. Reduces the remaining step from
+understanding the architecture to two clicks. This is the config-UI item
+elsewhere in this file, narrowed to the case that actually matters.
+
+**C. Register as a language model provider.** `lm.registerLanguageModelChatProvider`
+is **stable** API, not proposed, and needs a `languageModelChatProviders`
+contribution point. Models from every detected engine would appear directly in
+the chat model picker — no port, no JSON, no proxy concept exposed at all. It
+also makes the telemetry exact and live everywhere by construction, since the
+extension carries every request: no polling, no chunk-counting estimate, no
+`--metrics` flag to forget.
+
+The cost is real and should be weighed deliberately rather than drifted into.
+It means implementing `provideLanguageModelChatResponse`, translating OpenAI
+streams into VS Code's response part types including tool calls, plus
+`provideTokenCount`, which wants a genuine tokenizer — largely re-implementing
+what the built-in custom-endpoint support already does. And it changes what
+this project is: today a bug shows a wrong number, whereas a provider bug breaks
+the user's chat. That is the same critical-path objection that delayed the
+proxy, except permanent and much larger.
+
+Order: A, then B, then C only as a considered decision once the HUD itself is
+finished.
+
 ## Engine support
 
 See the support matrix in README.md. Detection is wired up and the poll adapter
