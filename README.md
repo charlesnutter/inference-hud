@@ -136,15 +136,19 @@ reading the stream as it passes.
 | **Ollama** | 11434 | No `/metrics` endpoint at all. `eval_count`/`eval_duration` go to the caller and nowhere else | probed live |
 | **LocalAI** | 8080 | `/metrics` exists but carries HTTP-level `api_call` histograms, no token counters | probed live |
 | **LM Studio** | 1234 | Per-response `stats` only — `tokens_per_second`, `time_to_first_token` | documented |
-| **MLX-LM** (`mlx_lm.server`) | 8080 | Serves only `/v1/chat/completions` and `/v1/models`. Returns an exact `usage` block — to the caller | documented |
+| **MLX-LM** (`mlx_lm.server`) | 8080 | No `/metrics`. Serves `/v1/chat/completions` and `/v1/models` only — no Anthropic endpoint. `usage` is returned on non-streamed replies, to the caller | probed live |
 | **TensorRT-LLM** (`trtllm-serve`) | 8000 | `/metrics` exists but is four latency histograms and a success counter: no token counters, no running-request gauge | documented |
 | **ExLlamaV2** (via TabbyAPI) | 5000 | OpenAI-compatible; no evidence of a metrics endpoint | **unverified** |
 | **Any OpenAI-compatible server** | 8000, 8080, 1234, 5000, 4891, 8090 | Unrecognised engine; only the `usage` block is guaranteed | — |
 
-MLX-LM is the easiest of these to settle: it runs natively on Apple Silicon, so
-`uv pip install mlx-lm` and a `./scripts/probe.sh` run would confirm it in
-minutes. TensorRT-LLM and ExLlamaV2 are CUDA-only and cannot be checked here at
-all.
+TensorRT-LLM and ExLlamaV2 are CUDA-only and cannot be checked on Apple Silicon,
+so those rows rest on documentation.
+
+Cache reporting differs by format and the proxy handles each: OpenAI counts
+cache reads *inside* `prompt_tokens` and details them under
+`prompt_tokens_details.cached_tokens`, so they are shown but never added; the
+Anthropic and Responses formats *exclude* them, so there they are added back to
+get a true prompt length.
 
 **TensorRT-LLM caveats**, if it is ever revisited:
 

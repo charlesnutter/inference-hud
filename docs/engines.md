@@ -98,7 +98,7 @@ exclusively to the caller. Rich response telemetry is not server-wide telemetry.
 | Engine | Expected telemetry | Install |
 |---|---|---|
 | **oMLX** | `/admin/api/stats`, server-wide but behind admin auth — needs a `SecretStorage` path before it can be supported | already installed; start its server from the app |
-| **`mlx_lm.server`** | **Proxy-only.** Its own SERVER.md documents exactly two endpoints, `/v1/chat/completions` and `/v1/models` — no `/metrics`, no Prometheus. It does return an exact `usage` block with `prompt_tokens`/`completion_tokens`, which makes it an ideal proxy target: no chunk-counting estimate needed. Not yet probed live | `uv pip install mlx-lm` |
+| **`mlx_lm.server`** | **Proxy-only, probed live 2026-09-11.** No `/metrics`. Serves `/v1/chat/completions` and `/v1/models`; `/v1/messages` is a genuine 404. Non-streamed replies carry exact `usage` including `prompt_tokens_details.cached_tokens`; streamed ones carry none, so the chunk estimate applies there. Emits reasoning as `delta.reasoning`. Measured through the proxy at 55 tok/s with TTFT 0.29s | `uv tool install mlx-lm` |
 | **KoboldCpp** | `/api/extra/perf` — documented to carry `last_process_time`, `last_eval_time`, `last_input_count`, `last_token_count`, plus idle/busy. That is a complete per-request set, so it is probably **pollable, not proxy-only** | macOS arm64 build from its releases page |
 | **LM Studio** | Per-response `stats` (`tokens_per_second`, `time_to_first_token`) only, so **expected proxy-only**. `/api/v0/models` gives loaded state | download the app, enable the local server |
 | **llamafile** | llama.cpp-derived, so may inherit `/slots` and `/metrics` | single-file download |

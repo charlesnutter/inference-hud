@@ -264,6 +264,16 @@ class StreamWatcher {
 				prompt: obj.usage.prompt_tokens ?? obj.usage.input_tokens,
 				completion: obj.usage.completion_tokens ?? obj.usage.output_tokens
 			};
+			// OpenAI reports cache reads as a *subset* of prompt_tokens, unlike
+			// Anthropic where they are excluded from it — so this is only ever
+			// read for display, never added back. `input_tokens_details` is the
+			// same field under the Responses API.
+			const cached =
+				obj.usage.prompt_tokens_details?.cached_tokens ??
+				obj.usage.input_tokens_details?.cached_tokens;
+			if (typeof cached === 'number' && cached > 0) {
+				this.cachedTokens = cached;
+			}
 		}
 		// Ollama's native shape reports its own counts and nanosecond timings.
 		if (typeof obj.eval_count === 'number') {
