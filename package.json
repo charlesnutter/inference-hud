@@ -54,6 +54,14 @@
       {
         "command": "inferenceHud.setupModel",
         "title": "Inference HUD: Set Up Local Model"
+      },
+      {
+        "command": "inferenceHud.openSettings",
+        "title": "Inference HUD: Open Settings"
+      },
+      {
+        "command": "inferenceHud.openWalkthrough",
+        "title": "Inference HUD: Open Walkthrough"
       }
     ],
     "configuration": {

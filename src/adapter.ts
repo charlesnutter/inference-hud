@@ -46,8 +46,13 @@ export type TelemetryEvent =
 	 * Something the user should know — a missing server flag, a degraded mode.
 	 * Adapters surface these rather than importing vscode, which keeps them
 	 * runnable (and testable) outside the extension host.
+	 *
+	 * `copyable` carries a value the notice is useless without, such as the URL
+	 * a client has to be repointed at. Its presence is what makes a notice worth
+	 * interrupting for: a message the user must act on has to be seen, and the
+	 * log is not seen. Without it an `info` notice stays in the log.
 	 */
-	| { kind: 'notice'; level: 'info' | 'warn'; message: string };
+	| { kind: 'notice'; level: 'info' | 'warn'; message: string; copyable?: string };
 
 export type Emit = (event: TelemetryEvent) => void;
 

@@ -1,10 +1,13 @@
 import * as vscode from 'vscode';
 import { CompletedStats, TelemetryEvent } from './adapter';
 import { ResolvedEndpoint, resolveEndpoints, configuredEndpoints } from './endpoints';
+import { detect } from './engines';
 import { setUpModel } from './setup';
 
 const RECONNECT_MIN_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
+/** How often to re-probe localhost for engines that were not there before. */
+const RESCAN_MS = 20000;
 
 export function activate(context: vscode.ExtensionContext) {
 	const log = vscode.window.createOutputChannel('Inference HUD', { log: true });
@@ -106,6 +109,18 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('inferenceHud.showLog', () => log.show()),
 		vscode.commands.registerCommand('inferenceHud.reconnect', () => void restart()),
 		vscode.commands.registerCommand('inferenceHud.setupModel', () => setUpModel(log)),
+		vscode.commands.registerCommand('inferenceHud.openSettings', () =>
+			vscode.commands.executeCommand(
+				'workbench.action.openSettings',
+				'@ext:charlesnutter.inference-hud'
+			)
+		),
+		vscode.commands.registerCommand('inferenceHud.openWalkthrough', () =>
+			vscode.commands.executeCommand(
+				'workbench.action.openWalkthrough',
+				'charlesnutter.inference-hud#inferenceHud.setup'
+			)
+		),
 		vscode.workspace.onDidChangeConfiguration(e => {
 			if (
 				e.affectsConfiguration('inferenceHud.endpoints') ||
@@ -118,6 +133,28 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 		})
 	);
+
+	// Detection ran only at activation and on configuration change, so starting
+	// an engine after the editor was already open left it invisible until a
+	// reload. Rescan quietly and restart only when the set of reachable servers
+	// has actually changed, so a running watcher is never disturbed for nothing.
+	let lastSeen = '';
+	const rescan = setInterval(() => {
+		const cfg = vscode.workspace.getConfiguration('inferenceHud');
+		if (!cfg.get<boolean>('autoDetect', true)) {
+			return;
+		}
+		void detect().then(found => {
+			const now = found.map(f => f.baseUrl).sort().join(',');
+			if (now === lastSeen) {
+				return;
+			}
+			lastSeen = now;
+			log.info(`detected engines changed: ${now || '(none)'}`);
+			void restart();
+		});
+	}, RESCAN_MS);
+	context.subscriptions.push(new vscode.Disposable(() => clearInterval(rescan)));
 
 	void restart();
 }
@@ -160,7 +197,7 @@ function render(
 			view.setConnected(endpoint);
 			break;
 		case 'notice':
-			view.notice(endpoint, event.level, event.message, log);
+			view.notice(endpoint, event.level, event.message, log, event.copyable);
 			break;
 		case 'prefill':
 			view.setPrefill(endpoint, event.done, event.total);
@@ -297,19 +334,37 @@ class StatusView {
 		endpoint: ResolvedEndpoint,
 		level: 'info' | 'warn',
 		message: string,
-		log: vscode.LogOutputChannel
+		log: vscode.LogOutputChannel,
+		copyable?: string
 	): void {
 		const key = `${endpoint.url}:${message}`;
 		if (this.seenNotices.has(key)) {
 			return;
 		}
 		this.seenNotices.add(key);
+
 		if (level === 'warn') {
 			log.warn(`${endpoint.url}: ${message}`);
 			void vscode.window.showWarningMessage(`Inference HUD: ${message}`);
-		} else {
-			log.info(`${endpoint.url}: ${message}`);
+			return;
 		}
+
+		log.info(`${endpoint.url}: ${message}`);
+		if (!copyable) {
+			return;
+		}
+		// An instruction the user has to act on is worth a popup even at info
+		// level, and worth a button: retyping a URL from a notification is how
+		// people mistype ports.
+		void vscode.window
+			.showInformationMessage(`Inference HUD: ${message}`, 'Copy URL', 'Set Up Model')
+			.then(pick => {
+				if (pick === 'Copy URL') {
+					void vscode.env.clipboard.writeText(copyable);
+				} else if (pick === 'Set Up Model') {
+					void vscode.commands.executeCommand('inferenceHud.setupModel');
+				}
+			});
 	}
 
 	private source(endpoint: ResolvedEndpoint): SourceState {
@@ -325,7 +380,21 @@ class StatusView {
 		const all = [...this.sources.values()];
 		if (all.length === 0) {
 			this.item.text = '$(debug-disconnect) no engine';
-			this.item.tooltip = 'Inference HUD: no inference server found.';
+			// The user most in need of help reaches this state, so it has to say
+			// what is missing and what would fix it, rather than name a setting
+			// that cannot help someone with no engine installed.
+			const md = new vscode.MarkdownString(
+				'**Inference HUD** — no local inference server found.\n\n' +
+					'This measures a server you are already running. Supported engines:\n\n' +
+					'| Engine | Port |\n|---|---|\n' +
+					'| MTPLX | 8000 |\n| vLLM | 8000 |\n| llama.cpp | 8080 |\n' +
+					'| SGLang | 30000 |\n| Ollama | 11434 |\n| LM Studio | 1234 |\n\n' +
+					'Start one and it is picked up automatically — only `127.0.0.1` is scanned.\n\n' +
+					`${LINKS}`
+			);
+			md.isTrusted = true;
+			md.supportThemeIcons = true;
+			this.item.tooltip = md;
 			return;
 		}
 		// Only claim disconnected when nothing at all is reachable.
@@ -395,6 +464,18 @@ class StatusView {
 				);
 			}
 		}
+		md.appendMarkdown(`\n\n${LINKS}`);
+		md.isTrusted = true;
 		return md;
 	}
 }
+
+/**
+ * Footer shown on every tooltip. Command links need `isTrusted` on the
+ * MarkdownString, which is set wherever this is used.
+ */
+const LINKS =
+	'[Walkthrough](command:inferenceHud.openWalkthrough) · ' +
+	'[Settings](command:inferenceHud.openSettings) · ' +
+	'[Log](command:inferenceHud.showLog) · ' +
+	'[GitHub](https://github.com/charlesnutter/inference-hud)';

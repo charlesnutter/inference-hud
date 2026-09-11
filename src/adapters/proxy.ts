@@ -71,13 +71,17 @@ export function proxyAdapter(listenPort: number): TelemetryAdapter {
 
 				server.listen(listenPort, '127.0.0.1', () => {
 					emit({ kind: 'connected' });
+					// This has to be seen, not logged. Traffic sent to the engine
+					// directly still works and is simply invisible, so a user who
+					// misses this concludes the extension is broken.
 					emit({
 						kind: 'notice',
 						level: 'info',
 						message:
-							`Proxy listening on http://127.0.0.1:${listenPort} -> ${upstreamUrl}. ` +
-							`Point your client's base URL at http://127.0.0.1:${listenPort}/v1 ` +
-							'to have its traffic measured.'
+							`Measuring ${upstreamUrl} through a proxy. Point your client's base ` +
+							`URL at http://127.0.0.1:${listenPort}/v1 — traffic sent straight to ` +
+							'the engine still works, but cannot be measured.',
+						copyable: `http://127.0.0.1:${listenPort}/v1`
 					});
 				});
 
