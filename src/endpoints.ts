@@ -32,6 +32,12 @@ export interface ResolvedEndpoint {
 	label: string;
 	/** True when auto-detection found this rather than the user configuring it. */
 	detected: boolean;
+	/**
+	 * Local port this endpoint's proxy listens on, when it has one. Clients must
+	 * be pointed here rather than at `url`, so setup needs it as a real field
+	 * rather than something parsed back out of a display label.
+	 */
+	proxyPort?: number;
 }
 
 /** An endpoint we identified but cannot read, so the user can be told why. */
@@ -57,7 +63,11 @@ const normalize = (url: string) => url.trim().replace(/\/+$/, '');
  */
 export async function resolveEndpoints(
 	configured: readonly EndpointConfig[],
-	autoDetect: boolean
+	autoDetect: boolean,
+	/** Start proxies for detected engines that publish nothing. */
+	autoProxy = false,
+	/** First port an auto-started proxy may claim; later ones increment. */
+	autoProxyPort = 8788
 ): Promise<Resolution> {
 	const endpoints: ResolvedEndpoint[] = [];
 	const unsupported: UnsupportedEndpoint[] = [];
@@ -81,7 +91,8 @@ export async function resolveEndpoints(
 				url,
 				adapter: proxyAdapter(proxyPort),
 				label: label ?? `${url} (via :${proxyPort})`,
-				detected: false
+				detected: false,
+				proxyPort
 			});
 			continue;
 		}
@@ -122,6 +133,15 @@ export async function resolveEndpoints(
 	}
 
 	if (autoDetect) {
+		// Ports already claimed by an explicit proxy entry, so an auto-started
+		// one never lands on top of a proxy the user configured by hand.
+		const claimed = new Set(
+			configured
+				.map(e => (typeof e === 'string' ? undefined : e.proxy))
+				.filter((n): n is number => typeof n === 'number')
+		);
+		let nextPort = autoProxyPort;
+
 		for (const hit of await detect()) {
 			const url = normalize(hit.baseUrl);
 			if (seen.has(url)) {
@@ -129,15 +149,36 @@ export async function resolveEndpoints(
 			}
 			seen.add(url);
 			const adapter = ADAPTERS[hit.engine.id];
-			if (!adapter) {
-				unsupported.push({
+			if (adapter) {
+				endpoints.push({ url, adapter, label: hit.label, detected: true });
+				continue;
+			}
+
+			// No adapter. If the engine publishes nothing server-wide, the only
+			// way to measure it is to carry its traffic — so offer to, rather
+			// than reporting a dead end the user has to configure their way out
+			// of. Engines blocked for other reasons (oMLX needs credentials)
+			// are not helped by a proxy and are still listed as unsupported.
+			if (autoProxy && hit.engine.mode === 'proxy') {
+				while (claimed.has(nextPort)) {
+					nextPort++;
+				}
+				claimed.add(nextPort);
+				endpoints.push({
 					url,
-					engineName: hit.engine.displayName,
-					reason: describe(hit.engine.id)
+					adapter: proxyAdapter(nextPort),
+					label: `${hit.label} (via :${nextPort})`,
+					detected: true,
+					proxyPort: nextPort
 				});
 				continue;
 			}
-			endpoints.push({ url, adapter, label: hit.label, detected: true });
+
+			unsupported.push({
+				url,
+				engineName: hit.engine.displayName,
+				reason: describe(hit.engine.id)
+			});
 		}
 	}
 

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { CompletedStats, TelemetryEvent } from './adapter';
 import { EndpointConfig, ResolvedEndpoint, resolveEndpoints } from './endpoints';
+import { setUpModel } from './setup';
 
 const RECONNECT_MIN_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
@@ -33,7 +34,9 @@ export function activate(context: vscode.ExtensionContext) {
 		const cfg = vscode.workspace.getConfiguration('inferenceHud');
 		const { endpoints, unsupported } = await resolveEndpoints(
 			cfg.get<EndpointConfig[]>('endpoints', []),
-			cfg.get<boolean>('autoDetect', true)
+			cfg.get<boolean>('autoDetect', true),
+			cfg.get<boolean>('autoProxy', false),
+			cfg.get<number>('autoProxyPort', 8788)
 		);
 		if (myGen !== generation) {
 			return;
@@ -42,6 +45,10 @@ export function activate(context: vscode.ExtensionContext) {
 		for (const u of unsupported) {
 			log.info(`skipping ${u.url} (${u.engineName}): ${u.reason}`);
 		}
+		// An engine that only needs a proxy is one click from working, so offer
+		// the click rather than leaving a log line the user has to find and
+		// then translate into a settings edit.
+		void offerAutoProxy(unsupported, cfg);
 		view.setEndpoints(endpoints);
 
 		if (endpoints.length === 0) {
@@ -98,10 +105,13 @@ export function activate(context: vscode.ExtensionContext) {
 		}),
 		vscode.commands.registerCommand('inferenceHud.showLog', () => log.show()),
 		vscode.commands.registerCommand('inferenceHud.reconnect', () => void restart()),
+		vscode.commands.registerCommand('inferenceHud.setupModel', () => setUpModel(log)),
 		vscode.workspace.onDidChangeConfiguration(e => {
 			if (
 				e.affectsConfiguration('inferenceHud.endpoints') ||
-				e.affectsConfiguration('inferenceHud.autoDetect')
+				e.affectsConfiguration('inferenceHud.autoDetect') ||
+				e.affectsConfiguration('inferenceHud.autoProxy') ||
+				e.affectsConfiguration('inferenceHud.autoProxyPort')
 			) {
 				void restart();
 			}
@@ -112,6 +122,31 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {}
+
+/**
+ * Detected an engine that publishes nothing? It is supportable, just not
+ * without carrying its traffic. Offer to turn that on here, because the
+ * alternative is a log line explaining a settings key the user then has to find
+ * and hand-edit — which is the friction this exists to remove.
+ */
+async function offerAutoProxy(
+	unsupported: readonly { url: string; engineName: string }[],
+	cfg: vscode.WorkspaceConfiguration
+): Promise<void> {
+	if (cfg.get<boolean>('autoProxy', false) || unsupported.length === 0) {
+		return;
+	}
+	const names = [...new Set(unsupported.map(u => u.engineName))];
+	const pick = await vscode.window.showInformationMessage(
+		`Inference HUD found ${names.join(' and ')}, which publish no telemetry of ` +
+			'their own. Measuring them means routing their traffic through the extension.',
+		'Enable',
+		'Not now'
+	);
+	if (pick === 'Enable') {
+		await cfg.update('autoProxy', true, vscode.ConfigurationTarget.Global);
+	}
+}
 
 function render(
 	endpoint: ResolvedEndpoint,

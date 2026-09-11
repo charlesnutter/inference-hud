@@ -50,6 +50,10 @@
       {
         "command": "inferenceHud.reconnect",
         "title": "Inference HUD: Reconnect"
+      },
+      {
+        "command": "inferenceHud.setupModel",
+        "title": "Inference HUD: Set Up Local Model"
       }
     ],
     "configuration": {
@@ -107,6 +111,18 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Scan well-known ports on `127.0.0.1` for supported engines and watch whatever is found. Only localhost is ever scanned; remote servers must be listed in `#inferenceHud.endpoints#`."
+        },
+        "inferenceHud.autoProxy": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Automatically proxy detected engines that publish no server-wide telemetry, such as Ollama and LM Studio. Without this they cannot be measured at all; with it, the extension listens on a local port and forwards to the engine, reading the stream as it passes. You still point your client's base URL at the proxy \u2014 run `Inference HUD: Set Up Local Model` to do that without editing JSON.\n\nOff by default because it opens a listening socket on `127.0.0.1`."
+        },
+        "inferenceHud.autoProxyPort": {
+          "type": "number",
+          "default": 8788,
+          "minimum": 1024,
+          "maximum": 65535,
+          "markdownDescription": "First port an automatically started proxy may claim. Further engines take the next free port up. Ports named explicitly in `#inferenceHud.endpoints#` are never reused."
         },
         "inferenceHud.statusBarPriority": {
           "type": "number",
