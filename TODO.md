@@ -33,6 +33,44 @@ Notes only — nothing here is implemented or scheduled.
   Credentials (oMLX needs an admin key) must go in `SecretStorage`, never in
   settings.json, so any such UI needs a secure input path anyway.
 
+## Manual test pass before a release
+
+Everything built for onboarding is compile-verified only. A headless harness
+cannot click a notification or read a tooltip, so none of the following has ever
+actually run. This is the gate before packaging anything.
+
+**Set up first:** clear `inferenceHud.endpoints` from user settings, or an
+explicit entry masks detection and the first-run path never appears. Start at
+least two engines — bugs here have twice only shown up with more than one
+running. Then <kbd>F5</kbd>.
+
+- [ ] **No engine at all.** Status bar reads `no engine`; the tooltip names the
+      supported engines and their ports rather than dead-ending.
+- [ ] **An observable engine** (llama.cpp, vLLM, MTPLX) is found with no
+      configuration and shows `⚡ <model> idle`.
+- [ ] **A proxy-only engine** (Ollama, MLX-LM) triggers the "publishes no
+      telemetry … [Enable]" notification. Clicking Enable writes the setting and
+      restarts without a reload.
+- [ ] **The proxy's Copy URL popup** appears once the proxy starts, and the
+      button puts the right URL on the clipboard. This is the one instruction a
+      user cannot succeed without: traffic sent to the engine instead works
+      perfectly and shows nothing.
+- [ ] **`Inference HUD: Set Up Local Model`** — QuickPicks list the reachable
+      servers and their real model ids, the generated entry points at the proxy
+      URL where one applies, and the clipboard and file-open both work.
+- [ ] **Tooltip command links** — walkthrough, settings, log, GitHub. Command
+      links need `isTrusted`, which is set, but has never been exercised.
+- [ ] **The Welcome walkthrough** appears, and each step ticks on its own
+      completion event rather than on being clicked.
+- [ ] **Settings UI** — five of six settings render as form controls;
+      `endpoints` gets a real Add Item list. Only `endpointOverrides` should
+      fall back to the JSON link.
+- [ ] **Rescan** — start an engine *after* the editor is open and confirm it is
+      picked up within ~20s with no reload.
+- [ ] **Status bar under load** — model name is legible and the bar does not
+      overflow on a narrow window. This was the judgement call left open when
+      the name was added.
+
 ## Proxy: the listen port has no default
 
 `{"url": ..., "proxy": 8788}` requires inventing a port, and 8788 is invented —
