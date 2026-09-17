@@ -138,30 +138,23 @@ proxy, except permanent and much larger.
 Order: A, then B, then C only as a considered decision once the HUD itself is
 finished.
 
-## Proxy: the Responses wire format is unread
+## Proxy: a whole-body response reports a time to first token
 
-VS Code custom endpoints take an `apiType` of `chatCompletions`, `responses` or
-`messages`. The proxy reads the first two and forwards the third unmeasured, so
-a client pointed at `/v1/responses` generates normally and the status bar stays
-quiet.
+A non-streamed reply arrives in one piece, so there is no interval between the
+first token and the last: time to first token and total request time are the
+same number. The chat-completions path reports it anyway — a whole-body request
+measured 0.156s TTFT and 0.156s elapsed — while the Anthropic and Responses
+paths omit it, because they recognise the whole body by its shape and never
+reach the code that marks a first token.
 
-This is reachable now, not hypothetical: llama.cpp b9860 and Ollama 0.32.15 both
-serve all three. Captured from llama.cpp:
+The omission is the honest half, and matches the reasoning already applied to
+the decode rate in the same file: a whole-body response has no interval, so the
+rate is unmeasurable rather than zero. The same is true of TTFT. Dropping it
+from the OpenAI path would make all three agree, at the cost of a field that is
+currently populated for non-streamed chat completions.
 
-```
-non-streamed: {"object":"response","output":[{"content":[{"type":"output_text","text":"..."}]}],
-               "usage":{"input_tokens":31,"output_tokens":10,
-                        "input_tokens_details":{"cached_tokens":24}}}
-streamed:     response.created, response.in_progress, response.output_item.added,
-              response.output_text.delta (one per token), response.output_text.done,
-              response.output_item.done
-```
-
-So it is a third dispatch in `absorb`, matching `type` prefixed
-`response.`, with the text at `delta` on `response.output_text.delta` and the
-totals in the final object's `usage`. `input_tokens_details.cached_tokens` needs
-adding back the same way Anthropic's `cache_read_input_tokens` does, or a warm
-prefix under-reports the prompt.
+Left alone rather than changed alongside the Responses work, since it alters
+behaviour that was verified against live engines and deserves its own pass.
 
 ## Engine support
 

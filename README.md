@@ -146,9 +146,10 @@ so those rows rest on documentation.
 
 Cache reporting differs by format and the proxy handles each: OpenAI counts
 cache reads *inside* `prompt_tokens` and details them under
-`prompt_tokens_details.cached_tokens`, so they are shown but never added; the
-Anthropic and Responses formats *exclude* them, so there they are added back to
-get a true prompt length.
+`prompt_tokens_details.cached_tokens`, so they are shown but never added, and
+the Responses format does the same under `input_tokens_details`. Anthropic is
+the exception — `cache_read_input_tokens` is *excluded* from `input_tokens`, so
+there it is added back to get a true prompt length.
 
 **TensorRT-LLM caveats**, if it is ever revisited:
 
@@ -200,14 +201,23 @@ llama.cpp b9860 and Ollama 0.32.15, both of which answer every one:
 |---|---|---|
 | `/v1/chat/completions` | `chatCompletions` | ✅ |
 | `/v1/messages` — Anthropic Messages | `messages` | ✅ |
-| `/v1/responses` — OpenAI Responses | `responses` | ❌ **not yet** |
+| `/v1/responses` — OpenAI Responses | `responses` | ✅ |
 
-`responses` is a third event shape again — `response.output_text.delta` rather
-than a choice delta or a content block — and is currently forwarded unmeasured.
-If you point a client at it the generation works and the status bar stays quiet.
+`responses` is a third event shape again — a bare `delta` string on a typed
+event, rather than a choice delta or a content block. Its deltas are matched by
+that shape rather than by event name, so output text, reasoning and tool-call
+arguments all count without each name having to be known in advance; Ollama
+sends its thinking as `response.reasoning_summary_text.delta` and llama.cpp
+sends none at all.
 
-Reasoning tokens count as generated tokens under both supported formats, since a
-thinking model can spend an entire response in them.
+It is also the one format measured *exactly* while streaming. A chat-completions
+stream omits `usage` unless the caller asks for it, and asking would mean
+editing a request the editor composed, which the proxy will not do — so those
+counts are estimated from chunks. A Responses stream sends its totals unbidden
+at `response.completed`.
+
+Reasoning tokens count as generated tokens under every format, since a thinking
+model can spend an entire response in them.
 
 **Wire format and telemetry are independent.** An observable engine is measured
 from its metrics endpoint whatever its clients speak, so llama.cpp serving
@@ -215,11 +225,13 @@ from its metrics endpoint whatever its clients speak, so llama.cpp serving
 here, in the proxy, because this is the one place the traffic itself is read.
 `scripts/probe.sh` reports which formats a server offers.
 
-Both non-OpenAI formats report cache reads separately from new prompt tokens —
-Anthropic as `cache_read_input_tokens`, Responses as
-`input_tokens_details.cached_tokens` — so `input_tokens` alone reads as a
-handful of tokens for a prompt of thousands on a warm prefix. The prompt is
-reported as the sum, with the cached share shown separately.
+Anthropic reports cache reads *outside* `input_tokens`, as
+`cache_read_input_tokens`, so on a warm prefix `input_tokens` alone reads as a
+handful of tokens for a prompt of thousands; the prompt is reported as the sum,
+with the cached share shown separately. Responses does the opposite despite the
+similar field name: `input_tokens_details.cached_tokens` is a share *of*
+`input_tokens`, verified on llama.cpp b9860, where a warm repeat read 42 prompt
+tokens of which 41 cached. Adding those would have doubled the prompt.
 
 The proxy forwards bytes untouched and never modifies a request, so it cannot
 change what your client receives; a parse failure can only cost a number. Token

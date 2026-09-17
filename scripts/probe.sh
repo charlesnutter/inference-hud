@@ -62,6 +62,7 @@ probe_fmt() {
 }
 probe_fmt /v1/chat/completions "OpenAI chat completions (apiType chatCompletions)"
 probe_fmt /v1/messages         "Anthropic Messages (apiType messages)"
+probe_fmt /v1/responses        "OpenAI Responses (apiType responses)"
 echo
 
 echo "SERVER-WIDE TELEMETRY"

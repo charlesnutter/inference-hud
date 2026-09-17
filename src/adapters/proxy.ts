@@ -113,13 +113,15 @@ function handle(
 	upstream: URL,
 	emit: Emit
 ): void {
-	// `/v1/messages` is the Anthropic Messages API, which VS Code's chat can be
-	// pointed at directly — its custom endpoints take an apiType of
-	// `chatCompletions`, `responses` or `messages`. Omitting it here meant that
-	// traffic was forwarded perfectly and measured not at all.
-	const isCompletion = /\/(chat\/)?completions$|\/api\/(chat|generate)$|\/v1\/messages$/.test(
-		req.url ?? ''
-	);
+	// VS Code's custom endpoints take an apiType of `chatCompletions`,
+	// `responses` or `messages`, and all three are reachable against local
+	// engines today — llama.cpp b9860 and Ollama 0.32.15 serve every one. A
+	// format missing from this test is forwarded perfectly and measured not at
+	// all, which looks exactly like a broken extension from the status bar.
+	const isCompletion =
+		/\/(chat\/)?completions$|\/api\/(chat|generate)$|\/v1\/(messages|responses)$/.test(
+			req.url ?? ''
+		);
 	// Started here, when the request arrives, rather than when the response
 	// begins — otherwise the clock starts at the first byte and time to first
 	// token measures as zero. The interval between these two points is the
@@ -253,6 +255,20 @@ class StreamWatcher {
 		// A whole, non-streamed Anthropic reply.
 		if (obj.type === 'message' && Array.isArray(obj.content)) {
 			this.absorbAnthropic({ type: 'message_start', message: obj });
+			this.wholeBody = true;
+			return;
+		}
+
+		// The Responses API, the third apiType. Typed events again, but its own
+		// names: no choices, no content blocks, the text on a bare `delta`.
+		if (typeof obj.type === 'string' && obj.type.startsWith('response.')) {
+			this.absorbResponses(obj);
+			return;
+		}
+		// A whole, non-streamed Responses reply. It has no top-level `type` at
+		// all, so it is recognised by its `object` instead.
+		if (obj.object === 'response' && Array.isArray(obj.output)) {
+			this.absorbResponses({ type: 'response.completed', response: obj });
 			this.wholeBody = true;
 			return;
 		}
@@ -399,6 +415,66 @@ class StreamWatcher {
 		}
 
 		this.countToken(typeof think === 'string' && think !== '');
+	}
+
+	/**
+	 * The Responses API's events, which carry the same facts under a third set
+	 * of names: the model arrives at `response.created`, the text on a bare
+	 * `delta` string, and an exact usage block at `response.completed`.
+	 *
+	 * That last one is worth more here than under chat completions. A chat
+	 * stream omits `usage` unless the caller asked for it, and asking means
+	 * editing a request the editor composed, which this proxy will not do — so
+	 * those counts stay chunk-estimated. The Responses stream sends its totals
+	 * unbidden, so a request measured this way is exact for nothing.
+	 *
+	 * Deltas are matched by shape rather than by name. Output text, reasoning
+	 * and tool-call arguments are all generated tokens costing the same decode
+	 * time, they all arrive as a string at `delta`, and enumerating the event
+	 * names means trusting a spec that has diverged from every engine this
+	 * project has actually adopted.
+	 */
+	private absorbResponses(obj: any): void {
+		const type: string = obj.type;
+
+		if (type === 'response.created' || type === 'response.in_progress') {
+			this.model = obj.response?.model ?? this.model;
+			return;
+		}
+		// `incomplete` as well as `completed`: a response cut short by a token
+		// limit still generated every token it reports, and is the common case
+		// under an agent loop with a budget.
+		if (type === 'response.completed' || type === 'response.incomplete') {
+			const r = obj.response ?? {};
+			this.model = r.model ?? this.model;
+			if (r.usage) {
+				this.usage = {
+					prompt: r.usage.input_tokens,
+					completion: r.usage.output_tokens
+				};
+				// Cache reads are a *subset* of `input_tokens` here, as under
+				// chat completions and unlike Anthropic, so this is displayed
+				// and never added back: llama.cpp b9860 on a warm prefix
+				// reported 33 input tokens of which 32 cached, and the prompt
+				// was 33, not 65.
+				const cached = r.usage.input_tokens_details?.cached_tokens;
+				if (typeof cached === 'number' && cached > 0) {
+					this.cachedTokens = cached;
+				}
+			}
+			return;
+		}
+
+		// Audio deltas are base64 samples rather than tokens, and would be
+		// counted as a wildly fast generation.
+		if (!type.endsWith('.delta') || type.includes('audio')) {
+			return;
+		}
+		const delta = obj.delta;
+		if (typeof delta !== 'string' || delta === '') {
+			return;
+		}
+		this.countToken(type.includes('reasoning'));
 	}
 
 	finish(): void {
