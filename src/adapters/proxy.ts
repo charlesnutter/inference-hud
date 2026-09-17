@@ -320,13 +320,30 @@ class StreamWatcher {
 			this.wholeBody = true;
 			return;
 		}
+		this.countToken(typeof think === 'string' && think !== '');
+	}
+
+	/**
+	 * One generated token has gone past.
+	 *
+	 * Every wire format ends here. They disagree about where the text sits and
+	 * what to call it, and about nothing else: a token costs the same decode
+	 * time whether it arrived as a choice delta, a content block or a typed
+	 * event, so the first-token mark, the running count and the rate are worked
+	 * out in one place rather than once per format.
+	 */
+	private countToken(reasoning: boolean): void {
+		if (this.firstToken === 0) {
+			this.firstToken = Date.now();
+			this.emit({ kind: 'prefill', done: null, total: null });
+		}
 		this.tokens += 1;
-		if (typeof think === 'string' && think !== '') {
+		if (reasoning) {
 			this.reasoningTokens++;
 		}
 
 		const now = Date.now();
-		if (now - this.lastEmit > 100 && this.tokens > 0) {
+		if (now - this.lastEmit > 100) {
 			this.lastEmit = now;
 			this.emit({
 				kind: 'progress',
@@ -381,24 +398,7 @@ class StreamWatcher {
 			return;
 		}
 
-		if (this.firstToken === 0) {
-			this.firstToken = Date.now();
-			this.emit({ kind: 'prefill', done: null, total: null });
-		}
-		this.tokens += 1;
-		if (typeof think === 'string' && think !== '') {
-			this.reasoningTokens++;
-		}
-
-		const now = Date.now();
-		if (now - this.lastEmit > 100) {
-			this.lastEmit = now;
-			this.emit({
-				kind: 'progress',
-				completionTokens: this.tokens,
-				decodeTokS: rateOf(this.tokens, now - this.firstToken)
-			});
-		}
+		this.countToken(typeof think === 'string' && think !== '');
 	}
 
 	finish(): void {
