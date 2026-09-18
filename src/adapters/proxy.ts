@@ -32,9 +32,6 @@ import { CompletedStats, Emit, TelemetryAdapter } from '../adapter';
  * A polling adapter can only sample.
  */
 
-/** Chunks arriving this far apart end one request and begin another. */
-const IDLE_GAP_MS = 250;
-
 /**
  * A rate needs a span to be a rate. The first token divided by the millisecond
  * since it arrived reads as a thousand tokens a second, which flashes in the
@@ -585,5 +582,3 @@ export class StreamWatcher {
 		this.emit({ kind: 'completed', stats });
 	}
 }
-
-export { IDLE_GAP_MS };

@@ -284,7 +284,6 @@ class StatusView {
 		if (this.active === endpoint.url) {
 			this.active = undefined;
 		}
-		this.seenNotices.delete(`${endpoint.url}:${detail}`);
 		this.repaintIdle();
 	}
 
