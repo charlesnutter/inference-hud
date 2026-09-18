@@ -1,4 +1,5 @@
 import { CompletedStats, Emit, TelemetryAdapter } from '../adapter';
+import { sleep } from '../sleep';
 
 const POLL_MS = 300;
 /**
@@ -270,9 +271,3 @@ function basename(p: string): string {
 	return p.split('/').pop() ?? p;
 }
 
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-	return new Promise(resolve => {
-		const t = setTimeout(resolve, ms);
-		signal.addEventListener('abort', () => { clearTimeout(t); resolve(); }, { once: true });
-	});
-}

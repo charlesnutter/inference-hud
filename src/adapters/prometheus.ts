@@ -1,4 +1,5 @@
 import { CompletedStats, Emit, TelemetryAdapter } from '../adapter';
+import { sleep } from '../sleep';
 
 /**
  * vLLM and SGLang both publish server-wide Prometheus counters and differ only
@@ -399,12 +400,6 @@ function parseLabels(body: string): Record<string, string> {
 	return out;
 }
 
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-	return new Promise(resolve => {
-		const t = setTimeout(resolve, ms);
-		signal.addEventListener('abort', () => { clearTimeout(t); resolve(); }, { once: true });
-	});
-}
 
 export const vllmAdapter = makeAdapter(VLLM);
 export const sglangAdapter = makeAdapter(SGLANG);
