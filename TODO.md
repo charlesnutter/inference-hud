@@ -156,6 +156,34 @@ currently populated for non-streamed chat completions.
 Left alone rather than changed alongside the Responses work, since it alters
 behaviour that was verified against live engines and deserves its own pass.
 
+## Should a warning re-fire after a reconnect?
+
+Notices are deduplicated per endpoint and message for the life of the view, so
+"llama-server was started without --metrics" is shown once. Restart the server
+with the flag and no re-warning is needed; restart it again without, and the
+warning does not return. A line in setDisconnected once tried to clear the
+dedupe key on disconnect, but it built the key from the error text rather than
+the message, so it never matched anything and was removed. The question it was
+trying to answer is open: probably yes for `warn`, keyed to a reconnect, and no
+for `info`.
+
+## Conventions not yet adopted
+
+Small, from the 2026-09-18 review; none blocks a release.
+
+- `displayName` carries a tagline (`Inference HUD — local LLM tokens/sec`);
+  Marketplace convention is the product name alone, with the tagline in
+  `description`.
+- Commands use a title prefix (`Inference HUD: Show Log`) rather than
+  `"category": "Inference HUD"`; the palette renders the same, menus do not.
+- No `CHANGELOG.md`; the Marketplace shows a Changelog tab.
+- `inferenceHud.statusBarPriority` is read once at activation and a status bar
+  item's priority cannot change after creation, so the setting needs a reload
+  and does not say so.
+- Clicking the status bar opens the log. A QuickPick (Set Up Model · Reconnect
+  · Settings · Log) is where a user goes when the tooltip links do not occur to
+  them.
+
 ## Engine support
 
 See the support matrix in README.md. Detection is wired up and the poll adapter
