@@ -90,3 +90,18 @@ vllm serve Qwen/Qwen2.5-0.5B-Instruct \
 `--gpu-memory-utilization` controls **CPU RAM** on the CPU backend despite its
 name. It defaults to 0.92, which fails outright when other processes hold
 memory. Expect roughly 40 tok/s; this is a CPU build with no Metal backend.
+
+## llama.cpp state (`fixtures/llamacpp/`)
+
+Captured live **2026-09-18** from `llama-server` b9860 with `--metrics`, the
+0.5B GGUF, `-c 8192`. `src/test/poll.test.ts` serves these back to the adapter
+in phases.
+
+| File | State |
+|---|---|
+| `props.json` | `/props` — `endpoint_metrics` and `endpoint_slots` both true |
+| `slots-idle.json` | `/slots` with nothing processing: four keys per slot, no token data |
+| `slots-busy.json` | `/slots` two seconds into a 3000-token `ignore_eos` generation: `n_prompt_tokens 693`, `n_prompt_tokens_processed 11`, `n_prompt_tokens_cache 24` |
+| `metrics-idle.prom` | `/metrics` before that request: `tokens_predicted_total 6805`, `tokens_predicted_seconds_total 21.363` |
+| `metrics-busy.prom` | `/metrics` during it: **identical counters**, `requests_processing 1` — the counters do not move until completion |
+| `metrics-after.prom` | `/metrics` after it: `9805` and `30.524` — 3000 tokens in 9.161 s |
