@@ -127,6 +127,7 @@ function handle(
 	// token measures as zero. The interval between these two points is the
 	// whole quantity a proxy exists to observe.
 	const watch = isCompletion ? new StreamWatcher(emit) : undefined;
+	let upstreamRes: http.IncomingMessage | undefined;
 
 	const proxied = http.request(
 		{
@@ -137,7 +138,8 @@ function handle(
 			method: req.method,
 			headers: { ...req.headers, host: upstream.host }
 		},
-		upstreamRes => {
+		r => {
+			upstreamRes = r;
 			res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);
 
 			if (!watch) {
@@ -146,6 +148,9 @@ function handle(
 			}
 
 			upstreamRes.on('data', (chunk: Buffer) => {
+				if (res.destroyed) {
+					return; // the client left; see the close handler below
+				}
 				// Forward first, always. Measurement must never gate delivery.
 				res.write(chunk);
 				try {
@@ -169,11 +174,38 @@ function handle(
 	proxied.on('error', err => {
 		// The upstream is down or refused. Answer rather than hang, so the
 		// client sees a normal failure instead of a stalled request.
+		if (res.destroyed) {
+			return; // nobody left to answer
+		}
 		if (!res.headersSent) {
 			res.writeHead(502, { 'content-type': 'application/json' });
 		}
 		res.end(JSON.stringify({ error: { message: `upstream unreachable: ${err.message}` } }));
 	});
+
+	// The client left early: Stop in the chat view, a closed tab, a timeout.
+	// Nothing carries that upstream on its own, so without this the engine
+	// generates the entire response for nobody — measured here as 6000 tokens
+	// over 19 seconds after the client was gone at two — and the watcher then
+	// reports a completion no one saw. Destroying the upstream request closes
+	// its socket, which every engine here takes as its cue to stop generating.
+	// `writableFinished` separates this from the normal close after `end()`.
+	res.on('close', () => {
+		if (res.writableFinished) {
+			return;
+		}
+		proxied.destroy();
+		upstreamRes?.destroy();
+		try {
+			watch?.finish(true);
+		} catch {
+			/* as above */
+		}
+	});
+	// A client that disconnects before its body has fully arrived emits an
+	// error here (ECONNRESET, since Node 15). Unhandled, that is an uncaught
+	// exception in the extension host, not a failed request.
+	req.on('error', () => proxied.destroy());
 
 	req.pipe(proxied);
 }
@@ -477,7 +509,8 @@ class StreamWatcher {
 		this.countToken(type.includes('reasoning'));
 	}
 
-	finish(): void {
+	/** `stopped` marks a request the client abandoned before the engine finished. */
+	finish(stopped = false): void {
 		if (this.done) {
 			return;
 		}
@@ -531,6 +564,11 @@ class StreamWatcher {
 			// Say so rather than implying a precision that isn't there: one
 			// streamed chunk is usually one token, but nothing guarantees it.
 			stats.extra!['Tokens'] = 'counted from stream chunks (approximate)';
+		}
+		if (stopped) {
+			// The tokens and the rate are real; what is missing is the end. Say
+			// so, or a stopped request reads as a short one.
+			stats.extra!['Stopped'] = `by the client after ${completion} tokens`;
 		}
 		if (this.reasoningTokens > 0 && !this.wholeBody) {
 			// Worth surfacing on its own: a thinking model can spend most of a
