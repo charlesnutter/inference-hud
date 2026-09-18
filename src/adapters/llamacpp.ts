@@ -1,6 +1,12 @@
 import { CompletedStats, Emit, TelemetryAdapter } from '../adapter';
 
 const POLL_MS = 300;
+/**
+ * Consecutive polls that may fail before the server is declared gone. One miss
+ * is a dropped connection or a server mid-restart; three in a row, with the
+ * identity path failing as well, is a server that is no longer there.
+ */
+const MAX_MISSES = 3;
 
 interface Slot {
 	is_processing: boolean;
@@ -73,9 +79,29 @@ export const llamaCppAdapter: TelemetryAdapter = {
 		// request's totals. Track the task id and distrust its first sample.
 		let taskId: number | undefined;
 		let samplesThisTask = 0;
+		let misses = 0;
 
 		while (!signal.aborted) {
 			const slots = (await getJson(`${base}/slots`, signal)) as Slot[] | null;
+
+			// A null read is either a server that has gone away or a server
+			// that is up and refusing this one path (`--no-slots` answers
+			// 501). Only the first is a disconnect, and the two are told apart
+			// the same way detection found the server: `/props` is always
+			// served. Without this the loop reads a dead port as "idle"
+			// forever, and the HUD shows a server that was stopped an hour
+			// ago as connected.
+			if (slots === null) {
+				if (signal.aborted) {
+					return;
+				}
+				if ((await getJson(`${base}/props`, signal)) === null && ++misses >= MAX_MISSES) {
+					throw new Error(`llama.cpp stopped answering at ${base}`);
+				}
+			} else {
+				misses = 0;
+			}
+
 			const active = Array.isArray(slots) ? slots.find(s => s.is_processing) : undefined;
 
 			if (active) {

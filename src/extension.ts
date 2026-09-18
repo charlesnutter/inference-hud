@@ -145,7 +145,11 @@ export function activate(context: vscode.ExtensionContext) {
 			return;
 		}
 		void detect().then(found => {
-			const now = found.map(f => f.baseUrl).sort().join(',');
+			// Keyed on engine as well as URL: stopping llama.cpp on 8080 and
+			// starting MLX-LM there leaves the URL set identical, and a key of
+			// URLs alone would let the llama.cpp adapter keep polling a server
+			// that is no longer llama.cpp.
+			const now = found.map(f => `${f.engine.id}@${f.baseUrl}`).sort().join(',');
 			if (now === lastSeen) {
 				return;
 			}
