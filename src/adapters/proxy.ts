@@ -1,4 +1,5 @@
 import * as http from 'http';
+import * as https from 'https';
 import { CompletedStats, Emit, TelemetryAdapter } from '../adapter';
 
 /**
@@ -129,7 +130,12 @@ function handle(
 	const watch = isCompletion ? new StreamWatcher(emit) : undefined;
 	let upstreamRes: http.IncomingMessage | undefined;
 
-	const proxied = http.request(
+	// `http.request` refuses an https: URL outright — it throws, synchronously,
+	// inside the request handler — while the port fallback below has always
+	// assumed TLS upstreams were fine. A remote engine behind a reverse proxy
+	// is exactly that case.
+	const request = upstream.protocol === 'https:' ? https.request : http.request;
+	const proxied = request(
 		{
 			protocol: upstream.protocol,
 			hostname: upstream.hostname,
