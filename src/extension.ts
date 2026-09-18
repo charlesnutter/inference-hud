@@ -421,7 +421,7 @@ class StatusView {
 					'Start one and it is picked up automatically — only `127.0.0.1` is scanned.\n\n' +
 					`${LINKS}`
 			);
-			md.isTrusted = true;
+			md.isTrusted = TRUSTED;
 			md.supportThemeIcons = true;
 			this.item.tooltip = md;
 			return;
@@ -459,7 +459,7 @@ class StatusView {
 
 		if (shown?.last) {
 			const s = shown.last;
-			md.appendMarkdown(`**${this.shortName(shown)}** — last request\n\n`);
+			md.appendMarkdown(`**${escapeMd(this.shortName(shown))}** — last request\n\n`);
 			md.appendMarkdown('| | |\n|---|---|\n');
 			md.appendMarkdown(`| Decode | **${unit(s.decodeTokS, ' tok/s', 2)}** |\n`);
 			md.appendMarkdown(`| End-to-end | ${unit(s.requestTokS, ' tok/s', 2)} |\n`);
@@ -471,11 +471,11 @@ class StatusView {
 				`| Prefill | ${s.promptTokens ?? 0} tokens @ ${unit(s.prefillTokS, ' tok/s', 0)} |\n`
 			);
 			md.appendMarkdown(
-				`| Cache | ${s.cachedTokens ?? 0} cached (${s.cacheSource ?? 'none'}) |\n`
+				`| Cache | ${s.cachedTokens ?? 0} cached (${escapeMd(s.cacheSource ?? 'none')}) |\n`
 			);
 			md.appendMarkdown(`| Context | ${s.contextLen ?? 0} tokens |\n`);
 			for (const [label, value] of Object.entries(s.extra ?? {})) {
-				md.appendMarkdown(`| ${label} | ${value} |\n`);
+				md.appendMarkdown(`| ${escapeMd(label)} | ${escapeMd(value)} |\n`);
 			}
 			md.appendMarkdown(`| Total | ${unit(s.requestElapsedS, 's', 2)} |\n`);
 		} else {
@@ -494,7 +494,7 @@ class StatusView {
 			}
 		}
 		md.appendMarkdown(`\n\n${LINKS}`);
-		md.isTrusted = true;
+		md.isTrusted = TRUSTED;
 		return md;
 	}
 }
@@ -508,3 +508,26 @@ const LINKS =
 	'[Settings](command:inferenceHud.openSettings) · ' +
 	'[Log](command:inferenceHud.showLog) · ' +
 	'[GitHub](https://github.com/charlesnutter/inference-hud)';
+
+/**
+ * Exactly the commands the footer links to, and no others. The tooltip also
+ * carries strings the server chose — a model id, a label, a cache source — and
+ * `isTrusted: true` would let any command link smuggled into one of those run
+ * on click. The whitelist means a hostile model id can at worst open the log.
+ */
+const TRUSTED: vscode.MarkdownString['isTrusted'] = {
+	enabledCommands: [
+		'inferenceHud.openWalkthrough',
+		'inferenceHud.openSettings',
+		'inferenceHud.showLog'
+	]
+};
+
+/**
+ * A server-supplied string rendered as text, not markdown. `appendText` does
+ * most of this, but leaves `|` alone, and a table cell does not survive one;
+ * `$(` is escaped too, since the tooltips render theme icons.
+ */
+function escapeMd(s: string): string {
+	return s.replace(/\$\(/g, '\\$(').replace(/[\\`*_{}[\]()#+\-!~|<>]/g, '\\$&');
+}
