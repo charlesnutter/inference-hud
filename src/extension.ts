@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { CompletedStats, TelemetryEvent } from './adapter';
 import { ResolvedEndpoint, resolveEndpoints, configuredEndpoints } from './endpoints';
-import { Detected, detect } from './engines';
+import { Detected, detect, detectionKey } from './engines';
+import { shortModel, unit } from './format';
 import { setUpModel } from './setup';
 
 const RECONNECT_MIN_MS = 1000;
@@ -170,18 +171,6 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {}
 
-/**
- * Keyed on engine as well as URL: stopping llama.cpp on 8080 and starting
- * MLX-LM there leaves the URL set identical, and a key of URLs alone would let
- * the llama.cpp adapter keep polling a server that is no longer llama.cpp.
- */
-function detectionKey(found: readonly Detected[]): string {
-	return found
-		.map(f => `${f.engine.id}@${f.baseUrl}`)
-		.sort()
-		.join(',');
-}
-
 /** "Not now" means not this session, not "ask again at the next restart". */
 let declinedAutoProxy = false;
 
@@ -239,39 +228,6 @@ function render(
 			log.info(`[${endpoint.adapter.id}] ${summarize(event.stats)}`);
 			break;
 	}
-}
-
-/**
- * A measurement with its unit, where a missing value renders as a bare dash.
- * Appending the unit unconditionally produces `—s` and `— tok/s`, which read
- * as a malformed number rather than as "this engine does not report it" —
- * a distinction that matters here, since several fields are genuinely absent
- * on some engines: llama.cpp publishes no time-to-first-token at all.
- */
-const unit = (n: number | undefined | null, suffix: string, digits = 1) =>
-	typeof n === 'number' && isFinite(n) ? `${n.toFixed(digits)}${suffix}` : '—';
-
-/** Longest model name the status bar will carry before it is elided. */
-const MODEL_BUDGET = 20;
-
-/**
- * Model ids are far longer than a status bar can spare once it also carries a
- * rate and a token count, so trim them to the part that actually identifies
- * the model: `Qwen/Qwen2.5-0.5B-Instruct` and
- * `qwen2.5-0.5b-instruct-q4_k_m.gguf` both reduce to a recognisable stem.
- *
- * Only affixes that carry no identity are dropped — namespace, file extension,
- * quantisation tag, and the role suffix nearly every instruct model shares.
- * Anything still over budget is elided rather than trimmed further, since
- * beyond this point the remaining characters are what tell two models apart.
- * The untouched id is always in the tooltip.
- */
-function shortModel(name: string): string {
-	let s = name.split('/').pop() ?? name;
-	s = s.replace(/\.(gguf|safetensors|bin|pt)$/i, '');
-	s = s.replace(/-(q\d+[a-z0-9_]*|f16|bf16|fp16|fp8|int[48])$/i, '');
-	s = s.replace(/-(instruct|chat|it)$/i, '');
-	return s.length > MODEL_BUDGET ? `${s.slice(0, MODEL_BUDGET - 1)}…` : s;
 }
 
 function summarize(s: CompletedStats): string {

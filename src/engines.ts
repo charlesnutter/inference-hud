@@ -184,6 +184,18 @@ export interface Detected {
 }
 
 /**
+ * Keyed on engine as well as URL: stopping llama.cpp on 8080 and starting
+ * MLX-LM there leaves the URL set identical, and a key of URLs alone would let
+ * the llama.cpp adapter keep polling a server that is no longer llama.cpp.
+ */
+export function detectionKey(found: readonly Detected[]): string {
+	return found
+		.map(f => `${f.engine.id}@${f.baseUrl}`)
+		.sort()
+		.join(',');
+}
+
+/**
  * Identify whichever engine is serving `baseUrl`, if any. Specific engines are
  * tried before the generic OpenAI fallback, so the first match wins.
  */

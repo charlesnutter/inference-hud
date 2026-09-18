@@ -218,7 +218,7 @@ function handle(
  * Ollama's native endpoints emit newline-delimited JSON, which falls out of the
  * same line-by-line handling.
  */
-class StreamWatcher {
+export class StreamWatcher {
 	private buffer = '';
 	private started = 0;
 	private firstToken = 0;
