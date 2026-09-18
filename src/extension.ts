@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { CompletedStats, TelemetryEvent } from './adapter';
 import { ResolvedEndpoint, resolveEndpoints, configuredEndpoints } from './endpoints';
-import { detect } from './engines';
+import { Detected, detect } from './engines';
 import { setUpModel } from './setup';
 
 const RECONNECT_MIN_MS = 1000;
@@ -27,23 +27,32 @@ export function activate(context: vscode.ExtensionContext) {
 	const view = new StatusView(item);
 	let abort: AbortController | undefined;
 	let generation = 0;
+	/** The scan the running watchers were built from, as the rescan compares it. */
+	let lastSeen = '';
 
-	async function restart(): Promise<void> {
+	async function restart(predetected?: readonly Detected[]): Promise<void> {
 		const myGen = ++generation;
 		abort?.abort();
 		const ac = new AbortController();
 		abort = ac;
 
 		const cfg = vscode.workspace.getConfiguration('inferenceHud');
-		const { endpoints, unsupported } = await resolveEndpoints(
+		const { endpoints, unsupported, detected } = await resolveEndpoints(
 			configuredEndpoints(cfg),
 			cfg.get<boolean>('autoDetect', true),
 			cfg.get<boolean>('autoProxy', false),
-			cfg.get<number>('autoProxyPort', 8788)
+			cfg.get<number>('autoProxyPort', 8788),
+			predetected
 		);
 		if (myGen !== generation) {
 			return;
 		}
+		// Seeded here, from the scan these watchers came from. Left empty, the
+		// first rescan tick saw every engine as newly arrived and tore the
+		// whole thing down twenty seconds after activation: proxy closed and
+		// reopened, last-request stats wiped, and the "found Ollama" prompt
+		// shown a second time to a user who had just dismissed it.
+		lastSeen = detectionKey(detected);
 
 		for (const u of unsupported) {
 			log.info(`skipping ${u.url} (${u.engineName}): ${u.reason}`);
@@ -138,24 +147,20 @@ export function activate(context: vscode.ExtensionContext) {
 	// an engine after the editor was already open left it invisible until a
 	// reload. Rescan quietly and restart only when the set of reachable servers
 	// has actually changed, so a running watcher is never disturbed for nothing.
-	let lastSeen = '';
 	const rescan = setInterval(() => {
 		const cfg = vscode.workspace.getConfiguration('inferenceHud');
 		if (!cfg.get<boolean>('autoDetect', true)) {
 			return;
 		}
 		void detect().then(found => {
-			// Keyed on engine as well as URL: stopping llama.cpp on 8080 and
-			// starting MLX-LM there leaves the URL set identical, and a key of
-			// URLs alone would let the llama.cpp adapter keep polling a server
-			// that is no longer llama.cpp.
-			const now = found.map(f => `${f.engine.id}@${f.baseUrl}`).sort().join(',');
+			const now = detectionKey(found);
 			if (now === lastSeen) {
 				return;
 			}
-			lastSeen = now;
 			log.info(`detected engines changed: ${now || '(none)'}`);
-			void restart();
+			// Hand the scan over rather than letting restart take its own, so
+			// the watchers and the key they are compared against agree.
+			void restart(found);
 		});
 	}, RESCAN_MS);
 	context.subscriptions.push(new vscode.Disposable(() => clearInterval(rescan)));
@@ -164,6 +169,21 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {}
+
+/**
+ * Keyed on engine as well as URL: stopping llama.cpp on 8080 and starting
+ * MLX-LM there leaves the URL set identical, and a key of URLs alone would let
+ * the llama.cpp adapter keep polling a server that is no longer llama.cpp.
+ */
+function detectionKey(found: readonly Detected[]): string {
+	return found
+		.map(f => `${f.engine.id}@${f.baseUrl}`)
+		.sort()
+		.join(',');
+}
+
+/** "Not now" means not this session, not "ask again at the next restart". */
+let declinedAutoProxy = false;
 
 /**
  * Detected an engine that publishes nothing? It is supportable, just not
@@ -175,7 +195,7 @@ async function offerAutoProxy(
 	unsupported: readonly { url: string; engineName: string }[],
 	cfg: vscode.WorkspaceConfiguration
 ): Promise<void> {
-	if (cfg.get<boolean>('autoProxy', false) || unsupported.length === 0) {
+	if (declinedAutoProxy || cfg.get<boolean>('autoProxy', false) || unsupported.length === 0) {
 		return;
 	}
 	const names = [...new Set(unsupported.map(u => u.engineName))];
@@ -187,6 +207,11 @@ async function offerAutoProxy(
 	);
 	if (pick === 'Enable') {
 		await cfg.update('autoProxy', true, vscode.ConfigurationTarget.Global);
+	} else {
+		// Declined, or dismissed. Every restart re-runs this — a new engine
+		// appearing, a setting changed — and asking again each time turns one
+		// decision into a nag. The walkthrough and the setting stay available.
+		declinedAutoProxy = true;
 	}
 }
 

@@ -3,7 +3,7 @@ import { mtplxAdapter } from './adapters/mtplx';
 import { llamaCppAdapter } from './adapters/llamacpp';
 import { vllmAdapter, sglangAdapter } from './adapters/prometheus';
 import { proxyAdapter } from './adapters/proxy';
-import { detect, probeOne } from './engines';
+import { Detected, detect, probeOne } from './engines';
 
 /** Engines with a working telemetry adapter, keyed by their `engines.ts` id. */
 export const ADAPTERS: Record<string, TelemetryAdapter> = {
@@ -56,6 +56,13 @@ export interface UnsupportedEndpoint {
 export interface Resolution {
 	endpoints: ResolvedEndpoint[];
 	unsupported: UnsupportedEndpoint[];
+	/**
+	 * What the localhost scan found, whether or not each became an endpoint.
+	 * The rescan compares against this, so it has to be the very scan these
+	 * endpoints were built from: a second scan taken moments later can differ,
+	 * and then the first rescan tick "notices" a change that never happened.
+	 */
+	detected: Detected[];
 }
 
 const normalize = (url: string) => url.trim().replace(/\/+$/, '');
@@ -91,11 +98,14 @@ export async function resolveEndpoints(
 	/** Start proxies for detected engines that publish nothing. */
 	autoProxy = false,
 	/** First port an auto-started proxy may claim; later ones increment. */
-	autoProxyPort = 8788
+	autoProxyPort = 8788,
+	/** A scan the caller has already taken, so the rescan need not take another. */
+	predetected?: readonly Detected[]
 ): Promise<Resolution> {
 	const endpoints: ResolvedEndpoint[] = [];
 	const unsupported: UnsupportedEndpoint[] = [];
 	const seen = new Set<string>();
+	let detected: Detected[] = [];
 
 	for (const entry of configured) {
 		const url = normalize(typeof entry === 'string' ? entry : entry.url);
@@ -165,8 +175,9 @@ export async function resolveEndpoints(
 				.filter((n): n is number => typeof n === 'number')
 		);
 		let nextPort = autoProxyPort;
+		detected = predetected ? [...predetected] : await detect();
 
-		for (const hit of await detect()) {
+		for (const hit of detected) {
 			const url = normalize(hit.baseUrl);
 			if (seen.has(url)) {
 				continue;
@@ -206,7 +217,7 @@ export async function resolveEndpoints(
 		}
 	}
 
-	return { endpoints, unsupported };
+	return { endpoints, unsupported, detected };
 }
 
 function describe(engineId: string): string {
