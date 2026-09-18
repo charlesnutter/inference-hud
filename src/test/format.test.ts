@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { shortModel, unit } from '../format';
+import { count, shortModel, unit } from '../format';
 
 test('shortModel drops affixes that carry no identity', () => {
 	assert.equal(shortModel('Qwen/Qwen2.5-0.5B-Instruct'), 'Qwen2.5-0.5B');
@@ -23,4 +23,11 @@ test('unit renders a missing value as a dash, never as a dash with a unit', () =
 	assert.equal(unit(null, ' tok/s'), '—');
 	assert.equal(unit(NaN, 's'), '—');
 	assert.equal(unit(Infinity, 's'), '—');
+});
+
+test('count renders a missing count as a dash, not as zero', () => {
+	assert.equal(count(120, ' tokens'), '120 tokens');
+	assert.equal(count(0, ' tokens'), '0 tokens');
+	assert.equal(count(undefined, ' tokens'), '—');
+	assert.equal(count(null, ''), '—');
 });

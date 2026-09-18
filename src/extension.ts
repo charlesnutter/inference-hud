@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { CompletedStats, TelemetryEvent } from './adapter';
 import { ResolvedEndpoint, resolveEndpoints, configuredEndpoints } from './endpoints';
 import { Detected, detect, detectionKey } from './engines';
-import { shortModel, unit } from './format';
+import { count, shortModel, unit } from './format';
 import { setUpModel } from './setup';
 
 const RECONNECT_MIN_MS = 1000;
@@ -232,8 +232,8 @@ function render(
 
 function summarize(s: CompletedStats): string {
 	return (
-		`done · ${unit(s.decodeTokS, ' tok/s', 2)} · ${s.completionTokens ?? 0} out / ` +
-		`${s.promptTokens ?? 0} in · ttft ${unit(s.ttftS, 's', 3)} · total ${unit(s.requestElapsedS, 's', 2)}`
+		`done · ${unit(s.decodeTokS, ' tok/s', 2)} · ${count(s.completionTokens, '')} out / ` +
+		`${count(s.promptTokens, '')} in · ttft ${unit(s.ttftS, 's', 3)} · total ${unit(s.requestElapsedS, 's', 2)}`
 	);
 }
 
@@ -419,16 +419,26 @@ class StatusView {
 			md.appendMarkdown(`| Decode | **${unit(s.decodeTokS, ' tok/s', 2)}** |\n`);
 			md.appendMarkdown(`| End-to-end | ${unit(s.requestTokS, ' tok/s', 2)} |\n`);
 			md.appendMarkdown(
-				`| Generated | ${s.completionTokens ?? 0} tokens in ${unit(s.decodeElapsedS, 's', 2)} |\n`
+				`| Generated | ${count(s.completionTokens, ' tokens')} in ${unit(s.decodeElapsedS, 's', 2)} |\n`
 			);
 			md.appendMarkdown(`| TTFT | ${unit(s.ttftS, 's', 3)} |\n`);
-			md.appendMarkdown(
-				`| Prefill | ${s.promptTokens ?? 0} tokens @ ${unit(s.prefillTokS, ' tok/s', 0)} |\n`
-			);
-			md.appendMarkdown(
-				`| Cache | ${s.cachedTokens ?? 0} cached (${escapeMd(s.cacheSource ?? 'none')}) |\n`
-			);
-			md.appendMarkdown(`| Context | ${s.contextLen ?? 0} tokens |\n`);
+			// Each row says what the engine reported and nothing more. A dash is
+			// "not reported"; `0 tokens` would be a claim. A streamed chat
+			// completion through the proxy knows none of these three.
+			const prefill =
+				s.promptTokens === undefined
+					? '—'
+					: `${s.promptTokens} tokens` +
+						(s.prefillTokS !== undefined ? ` @ ${unit(s.prefillTokS, ' tok/s', 0)}` : '');
+			md.appendMarkdown(`| Prefill | ${prefill} |\n`);
+			const cache =
+				s.cachedTokens !== undefined && s.cachedTokens > 0
+					? `${s.cachedTokens} cached (${escapeMd(s.cacheSource ?? 'cache')})`
+					: s.cacheSource !== undefined
+						? escapeMd(s.cacheSource) // the engine said "none", and it knows
+						: '—';
+			md.appendMarkdown(`| Cache | ${cache} |\n`);
+			md.appendMarkdown(`| Context | ${count(s.contextLen, ' tokens')} |\n`);
 			for (const [label, value] of Object.entries(s.extra ?? {})) {
 				md.appendMarkdown(`| ${escapeMd(label)} | ${escapeMd(value)} |\n`);
 			}

@@ -13,6 +13,15 @@
 export const unit = (n: number | undefined | null, suffix: string, digits = 1) =>
 	typeof n === 'number' && isFinite(n) ? `${n.toFixed(digits)}${suffix}` : '—';
 
+/**
+ * A count with its noun, where a missing count is a dash — not `0 tokens`,
+ * which claims a measurement that was never made. The proxy cannot know the
+ * prompt length of a streamed chat completion; that is different from knowing
+ * it was zero.
+ */
+export const count = (n: number | undefined | null, suffix: string) =>
+	typeof n === 'number' && isFinite(n) ? `${n}${suffix}` : '—';
+
 /** Longest model name the status bar will carry before it is elided. */
 const MODEL_BUDGET = 20;
 
