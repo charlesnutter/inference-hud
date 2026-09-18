@@ -17,7 +17,7 @@ const found = (id: string, port: number): Detected => ({
 
 test('observable engines get their adapter; proxy-only ones get a proxy, in order', async () => {
 	const scan = [found('ollama', 11434), found('llamacpp', 8080), found('lmstudio', 1234)];
-	const r = await resolveEndpoints([], true, true, 8788, scan);
+	const r = await resolveEndpoints([], true, true, 8788, { predetected: scan });
 	assert.deepEqual(
 		r.endpoints.map(e => [e.adapter.id, e.url, e.proxyPort]),
 		[
@@ -37,7 +37,7 @@ test('a port claimed by an explicit proxy entry is skipped', async () => {
 		true,
 		true,
 		8788,
-		[found('ollama', 11434)]
+		{ predetected: [found('ollama', 11434)] }
 	);
 	assert.deepEqual(
 		r.endpoints.map(e => [e.url, e.proxyPort]),
@@ -49,7 +49,7 @@ test('a port claimed by an explicit proxy entry is skipped', async () => {
 });
 
 test('without autoProxy, a proxy-only engine is reported, not watched', async () => {
-	const r = await resolveEndpoints([], true, false, 8788, [found('ollama', 11434), found('vllm', 8000)]);
+	const r = await resolveEndpoints([], true, false, 8788, { predetected: [found('ollama', 11434), found('vllm', 8000)] });
 	assert.deepEqual(r.endpoints.map(e => e.adapter.id), ['vllm']);
 	assert.equal(r.unsupported.length, 1);
 	assert.equal(r.unsupported[0].engineName, 'Ollama');
@@ -57,7 +57,7 @@ test('without autoProxy, a proxy-only engine is reported, not watched', async ()
 });
 
 test('an engine blocked for a reason a proxy cannot fix stays unsupported', async () => {
-	const r = await resolveEndpoints([], true, true, 8788, [found('omlx', 8000)]);
+	const r = await resolveEndpoints([], true, true, 8788, { predetected: [found('omlx', 8000)] });
 	assert.deepEqual(r.endpoints, []);
 	assert.match(r.unsupported[0].reason, /authentication/);
 });
@@ -83,13 +83,13 @@ test('urls are normalised and deduplicated before anything else', async () => {
 		true,
 		false,
 		8788,
-		[found('llamacpp', 8080)]
+		{ predetected: [found('llamacpp', 8080)] }
 	);
 	assert.deepEqual(r.endpoints.map(e => [e.url, e.detected]), [['http://127.0.0.1:8080', false]]);
 });
 
 test('with autoDetect off, nothing is scanned and nothing is reported as detected', async () => {
-	const r = await resolveEndpoints([], false, true, 8788, [found('ollama', 11434)]);
+	const r = await resolveEndpoints([], false, true, 8788, { predetected: [found('ollama', 11434)] });
 	assert.deepEqual(r.endpoints, []);
 	assert.deepEqual(r.detected, []);
 });
@@ -112,7 +112,7 @@ async function occupy(): Promise<{ port: number; release: () => void }> {
 test('a port another program holds is skipped, not fought over', async () => {
 	const held = await occupy();
 	try {
-		const r = await resolveEndpoints([], true, true, held.port, [found('ollama', 11434)]);
+		const r = await resolveEndpoints([], true, true, held.port, { predetected: [found('ollama', 11434)] });
 		assert.equal(r.endpoints[0].proxyPort, held.port + 1);
 	} finally {
 		held.release();
@@ -133,6 +133,41 @@ test('an explicitly configured port that is taken is reported where it will be s
 		);
 		assert.equal(notices.length, 1);
 		assert.match(notices[0], new RegExp(`${held.port}.*in use by another program`));
+	} finally {
+		held.release();
+	}
+});
+
+test('a url keeps the proxy port it had, whatever order detection lists it in', async () => {
+	const remembered = new Map([['http://127.0.0.1:1234', 8788]]);
+	// LM Studio had 8788 last time; today Ollama is detected first.
+	const r = await resolveEndpoints([], true, true, 8788, {
+		predetected: [found('ollama', 11434), found('lmstudio', 1234)],
+		preferredPorts: remembered
+	});
+	assert.deepEqual(
+		r.endpoints.map(e => [e.url, e.proxyPort]),
+		[
+			['http://127.0.0.1:11434', 8789],
+			['http://127.0.0.1:1234', 8788]
+		]
+	);
+});
+
+test('a remembered port that is no longer available is not insisted on', async () => {
+	const held = await occupy();
+	try {
+		const r = await resolveEndpoints([{ url: 'http://10.0.0.5:1', proxy: 8790 }], true, true, 8788, {
+			predetected: [found('ollama', 11434), found('lmstudio', 1234)],
+			preferredPorts: new Map([
+				['http://127.0.0.1:11434', held.port], // taken by another program
+				['http://127.0.0.1:1234', 8790] // taken by the explicit entry
+			])
+		});
+		assert.deepEqual(
+			r.endpoints.filter(e => e.detected).map(e => e.proxyPort),
+			[8788, 8789]
+		);
 	} finally {
 		held.release();
 	}

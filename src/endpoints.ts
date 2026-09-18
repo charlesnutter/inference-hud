@@ -54,6 +54,19 @@ export interface UnsupportedEndpoint {
 	reason: string;
 }
 
+export interface ResolveOptions {
+	/** A scan the caller has already taken, so the rescan need not take another. */
+	predetected?: readonly Detected[];
+	/**
+	 * Proxy ports handed out on earlier runs, by upstream URL. Allocation was
+	 * by detection order, so with two proxied engines the second took the
+	 * first's port the moment the first went down — and the client entry the
+	 * user had written against that port now reached the wrong engine. A port
+	 * once given to a URL is given to it again while it is free.
+	 */
+	preferredPorts?: ReadonlyMap<string, number>;
+}
+
 export interface Resolution {
 	endpoints: ResolvedEndpoint[];
 	unsupported: UnsupportedEndpoint[];
@@ -100,9 +113,9 @@ export async function resolveEndpoints(
 	autoProxy = false,
 	/** First port an auto-started proxy may claim; later ones increment. */
 	autoProxyPort = 8788,
-	/** A scan the caller has already taken, so the rescan need not take another. */
-	predetected?: readonly Detected[]
+	opts: ResolveOptions = {}
 ): Promise<Resolution> {
+	const { predetected, preferredPorts } = opts;
 	const endpoints: ResolvedEndpoint[] = [];
 	const unsupported: UnsupportedEndpoint[] = [];
 	const seen = new Set<string>();
@@ -178,6 +191,19 @@ export async function resolveEndpoints(
 		let nextPort = autoProxyPort;
 		detected = predetected ? [...predetected] : await detect();
 
+		// Reserve remembered ports before allocating any, or whichever engine
+		// detection happens to list first takes another's port as its "next
+		// free" one - the very reshuffle remembering exists to prevent.
+		const remembered = new Map<string, number>();
+		for (const hit of detected) {
+			const url = normalize(hit.baseUrl);
+			const port = preferredPorts?.get(url);
+			if (port !== undefined && hit.engine.mode === 'proxy' && !claimed.has(port)) {
+				remembered.set(url, port);
+				claimed.add(port);
+			}
+		}
+
 		for (const hit of detected) {
 			const url = normalize(hit.baseUrl);
 			if (seen.has(url)) {
@@ -196,20 +222,25 @@ export async function resolveEndpoints(
 			// of. Engines blocked for other reasons (oMLX needs credentials)
 			// are not helped by a proxy and are still listed as unsupported.
 			if (autoProxy && hit.engine.mode === 'proxy') {
-				// Skip ports named in the configuration and ports something
-				// else already holds. Without the second check a proxy landed
-				// on a taken port, failed with EADDRINUSE, and retried the same
-				// port with backoff forever - visible only in the log.
-				while (claimed.has(nextPort) || !(await isFree(nextPort))) {
-					nextPort++;
+				let port = remembered.get(url);
+				if (port === undefined || !(await isFree(port))) {
+					// Skip ports named in the configuration and ports something
+					// else already holds. Without the second check a proxy
+					// landed on a taken port, failed with EADDRINUSE, and
+					// retried the same port with backoff forever - visible only
+					// in the log.
+					while (claimed.has(nextPort) || !(await isFree(nextPort))) {
+						nextPort++;
+					}
+					port = nextPort;
 				}
-				claimed.add(nextPort);
+				claimed.add(port);
 				endpoints.push({
 					url,
-					adapter: proxyAdapter(nextPort),
-					label: `${hit.label} (via :${nextPort})`,
+					adapter: proxyAdapter(port),
+					label: `${hit.label} (via :${port})`,
 					detected: true,
-					proxyPort: nextPort
+					proxyPort: port
 				});
 				continue;
 			}

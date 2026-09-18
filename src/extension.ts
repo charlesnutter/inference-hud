@@ -5,6 +5,8 @@ import { Detected, detect, detectionKey } from './engines';
 import { count, shortModel, unit } from './format';
 import { setUpModel } from './setup';
 
+/** globalState key: proxy ports by upstream URL, so they survive restarts. */
+const PROXY_PORTS_KEY = 'inferenceHud.proxyPorts';
 const RECONNECT_MIN_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
 /** How often to re-probe localhost for engines that were not there before. */
@@ -38,16 +40,27 @@ export function activate(context: vscode.ExtensionContext) {
 		abort = ac;
 
 		const cfg = vscode.workspace.getConfiguration('inferenceHud');
+		const remembered = context.globalState.get<Record<string, number>>(PROXY_PORTS_KEY, {});
 		const { endpoints, unsupported, detected } = await resolveEndpoints(
 			configuredEndpoints(cfg),
 			cfg.get<boolean>('autoDetect', true),
 			cfg.get<boolean>('autoProxy', false),
 			cfg.get<number>('autoProxyPort', 8788),
-			predetected
+			{ predetected, preferredPorts: new Map(Object.entries(remembered)) }
 		);
 		if (myGen !== generation) {
 			return;
 		}
+		// The ports just handed out, so the same engine gets the same port
+		// next time. Written into a client's model entry by hand, a proxy port
+		// has to stay put; see ResolveOptions.preferredPorts.
+		const assigned: Record<string, number> = { ...remembered };
+		for (const e of endpoints) {
+			if (e.detected && e.proxyPort !== undefined) {
+				assigned[e.url] = e.proxyPort;
+			}
+		}
+		void context.globalState.update(PROXY_PORTS_KEY, assigned);
 		// Seeded here, from the scan these watchers came from. Left empty, the
 		// first rescan tick saw every engine as newly arrived and tore the
 		// whole thing down twenty seconds after activation: proxy closed and
