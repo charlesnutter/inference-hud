@@ -1,0 +1,1 @@
+{"error":{"message":"mlx runner failed: panic: mlx: [METAL] Command buffer execution failed: Caused GPU Timeout Error (00000002:kIOGPUCommandBufferCallbackErrorTimeout). at mlx/c/transforms.cpp:73 (exit: exit status 2)","type":"api_error","param":null,"code":null}}

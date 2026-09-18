@@ -33,7 +33,14 @@ Development Host launches with the extension loaded.
 
 ```bash
 npm install
+npm test
 ```
+
+The tests need no server. They replay bodies captured from real ones —
+`fixtures/proxy/` for the three wire formats the proxy reads, `fixtures/*.prom`
+for the Prometheus engines — each with its provenance recorded alongside. When a
+new engine or format is verified live, its capture goes there, so the
+verification outlives the session that did it.
 
 | State | Status bar |
 |---|---|
