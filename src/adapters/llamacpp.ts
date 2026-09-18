@@ -160,7 +160,18 @@ export const llamaCppAdapter: TelemetryAdapter = {
 						awaitingTotals = false;
 					}
 				} else if (hasMetrics && !awaitingTotals) {
-					baseline = (await readCounters(base, signal)) ?? baseline;
+					const now = await readCounters(base, signal);
+					if (now && baseline && now.predictedTokens > baseline.predictedTokens) {
+						// A whole request came and went between two polls: at
+						// 300 tok/s an eight-token answer is under the interval,
+						// so the slot was never seen busy. The counters still
+						// moved, and llama.cpp's carry their own seconds, so the
+						// totals and both rates are exact even though no live
+						// progress was ever shown. Without this the request was
+						// folded silently into the next baseline.
+						emit({ kind: 'completed', stats: toStats(model, baseline, now, undefined) });
+					}
+					baseline = now ?? baseline;
 				}
 			}
 

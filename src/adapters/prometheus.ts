@@ -211,6 +211,13 @@ function makeAdapter(spec: PromSpec): TelemetryAdapter {
 					busySince = undefined;
 					decodeSince = undefined;
 				} else {
+					if (now.generationTokens > baseline.generationTokens) {
+						// A request finished inside one poll interval, so
+						// `running` was never seen above zero. The counters
+						// carry its size but no timing, so it is reported with
+						// exact counts and no rate rather than dropped.
+						emit({ kind: 'completed', stats: toStats(spec, model, baseline, now) });
+					}
 					// Idle and staying idle: keep the baseline current so the
 					// next request is measured from the right starting point.
 					baseline = now;
@@ -243,18 +250,22 @@ function toStats(
 	model: string | undefined,
 	before: Sample,
 	after: Sample,
-	busySince: number,
-	decodeSince: number | undefined
+	/** Undefined when the request was never observed in flight. */
+	busySince?: number,
+	decodeSince?: number
 ): CompletedStats {
 	const completionTokens = after.generationTokens - before.generationTokens;
 	const promptTokens = after.promptTokens - before.promptTokens;
 	const cachedTokens = after.cachedTokens - before.cachedTokens;
 	// Wall-clock, quantized to the poll interval — the engines expose no
 	// per-request timing, so this is the only elapsed figure available.
-	const requestElapsedS = (after.at - busySince) / 1000;
+	const requestElapsedS = busySince !== undefined ? (after.at - busySince) / 1000 : undefined;
 	const decodeElapsedS = decodeSince !== undefined ? (after.at - decodeSince) / 1000 : undefined;
 
 	const extra: Record<string, string> = {};
+	if (busySince === undefined) {
+		extra['Timing'] = 'finished between polls; counts exact, no rate';
+	}
 	// TTFT is a Histogram: sum/count is an average over every request since
 	// the server started, not this request's value. Labelled so, and kept out
 	// of `ttftS` which the tooltip renders as a per-request figure.
@@ -272,7 +283,8 @@ function toStats(
 		completionTokens,
 		decodeTokS:
 			decodeElapsedS && decodeElapsedS > 0 ? completionTokens / decodeElapsedS : undefined,
-		requestTokS: requestElapsedS > 0 ? completionTokens / requestElapsedS : undefined,
+		requestTokS:
+			requestElapsedS && requestElapsedS > 0 ? completionTokens / requestElapsedS : undefined,
 		// Prefill is one scheduled step and the engines publish no prefill
 		// duration, so any rate here would be an artefact of the poll interval.
 		prefillTokS: undefined,
