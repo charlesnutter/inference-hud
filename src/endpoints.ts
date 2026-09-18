@@ -162,14 +162,9 @@ export async function resolveEndpoints(
 		// Unpinned: ask the URL what it is.
 		const hit = await probeOne(url);
 		if (!hit) {
-			// Unreachable or unrecognised. Keep it anyway so the HUD shows it
-			// reconnecting rather than silently dropping what the user asked for.
-			endpoints.push({
-				url,
-				adapter: mtplxAdapter,
-				label: label ?? url,
-				detected: false
-			});
+			// Nothing answered. Keep the entry - a server the user named may
+			// simply not be running yet - and identify it when it appears.
+			endpoints.push({ url, adapter: detectingAdapter, label: label ?? url, detected: false });
 			continue;
 		}
 		const adapter = ADAPTERS[hit.engine.id];
@@ -255,6 +250,45 @@ export async function resolveEndpoints(
 
 	return { endpoints, unsupported, detected };
 }
+
+/**
+ * For a configured URL nothing answered at resolve time.
+ *
+ * The previous fallback assigned the MTPLX adapter as a guess, and never
+ * revisited it. Configure llama.cpp on a non-default port before starting it
+ * and the HUD polled /v1/mtplx/metrics/stream against it for as long as the
+ * editor stayed open - 404, back off, 404 - while the rescan, which covers only
+ * default ports, never noticed. This adapter probes on every connection
+ * attempt instead and hands the run to whatever it finds, so the watcher's
+ * ordinary retry loop becomes the wait for the server to come up.
+ */
+const detectingAdapter: TelemetryAdapter = {
+	id: 'detect',
+	displayName: 'auto-detect',
+	async run(baseUrl, signal, emit) {
+		const hit = await probeOne(baseUrl);
+		if (signal.aborted) {
+			return;
+		}
+		if (!hit) {
+			throw new Error(`nothing answering at ${baseUrl}`);
+		}
+		const adapter = ADAPTERS[hit.engine.id];
+		if (!adapter) {
+			// Found, but not readable this way. Say so where it will be seen,
+			// once; the retry loop will keep asking, and the answer will not
+			// change until the configuration does.
+			emit({
+				kind: 'notice',
+				level: 'warn',
+				message: `${hit.engine.displayName} at ${baseUrl} ${describe(hit.engine.id)}`
+			});
+			throw new Error(`${hit.engine.displayName} at ${baseUrl}: ${describe(hit.engine.id)}`);
+		}
+		emit({ kind: 'notice', level: 'info', message: `${hit.engine.displayName} found at ${baseUrl}` });
+		return adapter.run(baseUrl, signal, emit);
+	}
+};
 
 /** Can a proxy bind here right now? A bind attempt is the only honest answer. */
 function isFree(port: number): Promise<boolean> {

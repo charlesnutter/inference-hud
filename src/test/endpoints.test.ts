@@ -4,6 +4,8 @@ import * as net from 'net';
 import { resolveEndpoints } from '../endpoints';
 import { proxyAdapter } from '../adapters/proxy';
 import { Detected, ENGINES, detectionKey } from '../engines';
+import { TelemetryEvent } from '../adapter';
+import { fixture, serve } from './helpers';
 
 /**
  * Detection is handed in, never run: these test how a scan becomes a list of
@@ -170,5 +172,63 @@ test('a remembered port that is no longer available is not insisted on', async (
 		);
 	} finally {
 		held.release();
+	}
+});
+
+/** A configured URL with nothing on it yet — port 1 refuses immediately. */
+const DOWN = 'http://127.0.0.1:1';
+
+test('a configured url that is down is kept, and identified on connect rather than guessed', async () => {
+	const r = await resolveEndpoints([DOWN], false);
+	assert.deepEqual(
+		r.endpoints.map(e => [e.adapter.id, e.url, e.detected]),
+		[['detect', DOWN, false]]
+	);
+	await assert.rejects(
+		r.endpoints[0].adapter.run(DOWN, new AbortController().signal, () => undefined),
+		/nothing answering/
+	);
+});
+
+test('when the server appears, the run is handed to its real adapter', async () => {
+	const { adapter } = (await resolveEndpoints([DOWN], false)).endpoints[0];
+	const s = await serve(
+		[{ '/props': fixture('llamacpp', 'props.json'), '/slots': fixture('llamacpp', 'slots-idle.json'), '/metrics': fixture('llamacpp', 'metrics-idle.prom') }],
+		99
+	);
+	try {
+		const events: TelemetryEvent[] = [];
+		const ac = new AbortController();
+		const run = adapter.run(s.url, ac.signal, e => {
+			events.push(e);
+			if (e.kind === 'connected') {
+				ac.abort();
+			}
+		});
+		await run;
+		assert.ok(events.some(e => e.kind === 'notice' && /llama\.cpp found/.test(e.message)));
+		assert.ok(events.some(e => e.kind === 'connected'));
+	} finally {
+		s.close();
+	}
+});
+
+test('when the server that appears cannot be read this way, the user is told', async () => {
+	const { adapter } = (await resolveEndpoints([DOWN], false)).endpoints[0];
+	const s = await serve([{ '/api/version': '{"version":"0.32.15"}' }], 99);
+	try {
+		const notices: string[] = [];
+		await assert.rejects(
+			adapter.run(s.url, new AbortController().signal, e => {
+				if (e.kind === 'notice' && e.level === 'warn') {
+					notices.push(e.message);
+				}
+			}),
+			/Ollama at .* publishes no server-wide telemetry/
+		);
+		assert.equal(notices.length, 1);
+		assert.match(notices[0], /proxy/);
+	} finally {
+		s.close();
 	}
 });

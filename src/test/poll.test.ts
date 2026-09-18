@@ -1,10 +1,9 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import * as http from 'http';
 import { TelemetryEvent } from '../adapter';
 import { llamaCppAdapter } from '../adapters/llamacpp';
 import { vllmAdapter } from '../adapters/prometheus';
-import { fixture } from './helpers';
+import { fixture, serve } from './helpers';
 
 /**
  * The poll adapters against a server that answers from captured fixtures, one
@@ -12,28 +11,6 @@ import { fixture } from './helpers';
  * the adapter sees the same sequence of states it would against the engine.
  * These take a couple of seconds each: the poll intervals are real.
  */
-
-type Routes = Record<string, string>;
-
-async function serve(phases: Routes[], pollsPerPhase: number) {
-	let hits = 0;
-	const server = http.createServer((req, res) => {
-		// Advance on the slot/metrics reads, not on /props, which is read once.
-		const phase = Math.min(Math.floor(hits / pollsPerPhase), phases.length - 1);
-		const body = phases[phase][req.url ?? ''];
-		if (req.url !== '/props') {
-			hits++;
-		}
-		if (body === undefined) {
-			res.writeHead(404).end();
-			return;
-		}
-		res.writeHead(200, { 'content-type': 'text/plain' }).end(body);
-	});
-	await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
-	const { port } = server.address() as { port: number };
-	return { url: `http://127.0.0.1:${port}`, close: () => server.close() };
-}
 
 /** Run until `done` says so or `ms` elapse, then abort. */
 async function collect(
