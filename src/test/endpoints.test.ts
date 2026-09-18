@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
+import * as net from 'net';
 import { resolveEndpoints } from '../endpoints';
+import { proxyAdapter } from '../adapters/proxy';
 import { Detected, ENGINES, detectionKey } from '../engines';
 
 /**
@@ -98,4 +100,40 @@ test('the detection key is order-independent and carries the engine', () => {
 	assert.equal(a, b);
 	assert.notEqual(a, detectionKey([found('ollama', 11434), found('openai-generic', 8080)]));
 	assert.equal(detectionKey([]), '');
+});
+
+/** Hold a port the way an unrelated program would. */
+async function occupy(): Promise<{ port: number; release: () => void }> {
+	const srv = net.createServer();
+	await new Promise<void>(r => srv.listen(0, '127.0.0.1', r));
+	return { port: (srv.address() as net.AddressInfo).port, release: () => srv.close() };
+}
+
+test('a port another program holds is skipped, not fought over', async () => {
+	const held = await occupy();
+	try {
+		const r = await resolveEndpoints([], true, true, held.port, [found('ollama', 11434)]);
+		assert.equal(r.endpoints[0].proxyPort, held.port + 1);
+	} finally {
+		held.release();
+	}
+});
+
+test('an explicitly configured port that is taken is reported where it will be seen', async () => {
+	const held = await occupy();
+	const notices: string[] = [];
+	try {
+		await assert.rejects(
+			proxyAdapter(held.port).run('http://127.0.0.1:11434', new AbortController().signal, e => {
+				if (e.kind === 'notice' && e.level === 'warn') {
+					notices.push(e.message);
+				}
+			}),
+			/already in use/
+		);
+		assert.equal(notices.length, 1);
+		assert.match(notices[0], new RegExp(`${held.port}.*in use by another program`));
+	} finally {
+		held.release();
+	}
 });

@@ -72,15 +72,24 @@ export function proxyAdapter(listenPort: number): TelemetryAdapter {
 
 				server.on('error', err => {
 					// Port already taken is the common case and needs to be
-					// legible, not a stack trace about EADDRINUSE.
+					// legible, not a stack trace about EADDRINUSE. Auto-started
+					// proxies avoid taken ports before they get here; a port the
+					// user named cannot be moved, so the collision is raised
+					// where it will be seen rather than left to the log, since
+					// the retry loop will otherwise sit on it silently.
 					const e = err as NodeJS.ErrnoException;
-					finish(
-						new Error(
-							e.code === 'EADDRINUSE'
-								? `proxy port ${listenPort} is already in use`
-								: `proxy on ${listenPort}: ${e.message}`
-						)
-					);
+					if (e.code === 'EADDRINUSE') {
+						emit({
+							kind: 'notice',
+							level: 'warn',
+							message:
+								`proxy port ${listenPort} for ${upstreamUrl} is in use by another ` +
+								'program. Choose a different port in inferenceHud.endpointOverrides.'
+						});
+						finish(new Error(`proxy port ${listenPort} is already in use`));
+						return;
+					}
+					finish(new Error(`proxy on ${listenPort}: ${e.message}`));
 				});
 
 				server.listen(listenPort, '127.0.0.1', () => {

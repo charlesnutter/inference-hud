@@ -1,3 +1,4 @@
+import * as net from 'net';
 import { TelemetryAdapter } from './adapter';
 import { mtplxAdapter } from './adapters/mtplx';
 import { llamaCppAdapter } from './adapters/llamacpp';
@@ -195,7 +196,11 @@ export async function resolveEndpoints(
 			// of. Engines blocked for other reasons (oMLX needs credentials)
 			// are not helped by a proxy and are still listed as unsupported.
 			if (autoProxy && hit.engine.mode === 'proxy') {
-				while (claimed.has(nextPort)) {
+				// Skip ports named in the configuration and ports something
+				// else already holds. Without the second check a proxy landed
+				// on a taken port, failed with EADDRINUSE, and retried the same
+				// port with backoff forever - visible only in the log.
+				while (claimed.has(nextPort) || !(await isFree(nextPort))) {
 					nextPort++;
 				}
 				claimed.add(nextPort);
@@ -218,6 +223,15 @@ export async function resolveEndpoints(
 	}
 
 	return { endpoints, unsupported, detected };
+}
+
+/** Can a proxy bind here right now? A bind attempt is the only honest answer. */
+function isFree(port: number): Promise<boolean> {
+	return new Promise(resolve => {
+		const probe = net.createServer();
+		probe.once('error', () => resolve(false));
+		probe.listen(port, '127.0.0.1', () => probe.close(() => resolve(true)));
+	});
 }
 
 function describe(engineId: string): string {
