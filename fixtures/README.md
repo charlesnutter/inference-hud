@@ -105,3 +105,14 @@ in phases.
 | `metrics-idle.prom` | `/metrics` before that request: `tokens_predicted_total 6805`, `tokens_predicted_seconds_total 21.363` |
 | `metrics-busy.prom` | `/metrics` during it: **identical counters**, `requests_processing 1` — the counters do not move until completion |
 | `metrics-after.prom` | `/metrics` after it: `9805` and `30.524` — 3000 tokens in 9.161 s |
+
+## Setup lookups (`fixtures/setup/`)
+
+Captured live **2026-09-18**, for `src/test/context.test.ts` — where each engine
+keeps the context window a request actually gets.
+
+| File | Source | Field read |
+|---|---|---|
+| `mtplx-models.json` | MTPLX `/v1/models` | `max_model_len`, `context_length` and `max_context_length`, all 262144 |
+| `ollama-ps.json` | Ollama 0.32.15 `/api/ps` with `Qwen3.8:27b-mlx` loaded | `models[].context_length` — the window it is *running* with |
+| `ollama-show.json` | Ollama 0.32.15 `/api/show` for the same model | `model_info["qwen3_5.context_length"]` — the trained maximum, used only when the model is not loaded |

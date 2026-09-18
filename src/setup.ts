@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
+import { budget, contextLength } from './context';
 import { resolveEndpoints, configuredEndpoints } from './endpoints';
+import { probeOne } from './engines';
 
 /**
  * Walks a user from "I have a local model running" to "it is selectable in the
@@ -94,8 +96,18 @@ export async function setUpModel(log: vscode.LogOutputChannel): Promise<void> {
 		return;
 	}
 
+	// The engine, to name the entry and to know where its context length is
+	// kept. The endpoint's adapter does not say - a proxied Ollama and a
+	// proxied LM Studio both read 'proxy' - so ask the server once more.
+	const engine = (await probeOne(chosen.url))?.engine;
+	const limits = new Map<string, ReturnType<typeof budget>>();
+	for (const id of picked) {
+		limits.set(id, budget(await contextLength(engine?.id ?? 'openai-generic', chosen.url, id)));
+	}
+	const unknown = picked.filter(id => !limits.get(id)!.known);
+
 	const entry = {
-		name: `Local ${shortHost(chosen.url)}`,
+		name: `Local ${engine?.displayName ?? shortHost(chosen.url)}`,
 		vendor: 'customendpoint',
 		apiType: 'chat-completions',
 		models: picked.map(id => ({
@@ -103,21 +115,31 @@ export async function setUpModel(log: vscode.LogOutputChannel): Promise<void> {
 			name: `${id} (Inference HUD)`,
 			url: clientBase,
 			toolCalling: true,
-			maxInputTokens: 28000,
-			maxOutputTokens: 4096
+			maxInputTokens: limits.get(id)!.maxInputTokens,
+			maxOutputTokens: limits.get(id)!.maxOutputTokens
 		}))
 	};
 	const block = JSON.stringify(entry, null, 2);
 
 	await vscode.env.clipboard.writeText(block);
-	log.info(`setup: prepared ${picked.length} chat model(s) at ${clientBase}`);
+	log.info(
+		`setup: prepared ${picked.length} chat model(s) at ${clientBase}: ` +
+			picked.map(id => `${id} in=${limits.get(id)!.maxInputTokens}`).join(', ')
+	);
 
 	const summary =
 		picked.length === 1 ? picked[0] : `${picked.length} models`;
+	const caveat =
+		unknown.length === 0
+			? ''
+			: ` ${unknown.length === picked.length ? 'The server' : `For ${unknown.join(', ')} the server`} ` +
+				'did not report a context length, so the input limit is a conservative ' +
+				'default — raise maxInputTokens if you know the real window.';
 	const action = await vscode.window.showInformationMessage(
-		`Copied ${summary}, pointing at ${clientBase}. Paste into the array in ` +
-			'chatLanguageModels.json — replacing any earlier Inference HUD entry for ' +
-			'this server rather than adding a second one.',
+		`Copied ${summary}, pointing at ${clientBase}, with limits read from the server.` +
+			caveat +
+			' Paste into the array in chatLanguageModels.json — replacing any earlier ' +
+			'Inference HUD entry for this server rather than adding a second one.',
 		'Open chatLanguageModels.json',
 		'Done'
 	);

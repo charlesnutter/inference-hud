@@ -1,0 +1,1 @@
+{"object":"list","data":[{"id":"mtplx-qwen38-27b-optimized-speed","object":"model","created":1789754293,"owned_by":"mtplx","capability":"chat","supports_vision":true,"modalities":{"input":["text","image"],"output":["text"]},"context_length":262144,"max_context_length":262144,"max_model_len":262144}]}
